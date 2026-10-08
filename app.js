@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=18';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=18';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=19';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=19';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -103,7 +103,7 @@ function shell(title, content, back = '#/home') {
 function thumb(p, big) {
   const fb = () => h('span', { class: 'lico' }, '👕');
   if (!p.image_url) return big ? null : fb();
-  const img = h('img', { class: big ? 'pimg big' : 'pimg', src: p.image_url, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+  const img = h('img', { class: big ? 'pimg big' : 'pimg', src: String(p.image_url).split('?')[0], alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
   img.addEventListener('error', () => { if (img.parentNode) img.replaceWith(...(big ? [] : [fb()])); });
   return img;
 }
@@ -134,7 +134,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-18'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-19'),
   ]);
 }
 
