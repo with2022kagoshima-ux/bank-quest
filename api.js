@@ -107,6 +107,26 @@ async function rest(path, { method = 'GET', body, prefer } = {}) {
   return j;
 }
 
+// ---------- 電波がないときの保存待ち(収入・支出の記録だけ) ----------
+const QK = 'withi_queue_v1';
+const qLoad = () => { try { return JSON.parse(localStorage.getItem(QK)) || []; } catch { return []; } };
+const qSave = q => { try { localStorage.setItem(QK, JSON.stringify(q)); } catch { /* 保存できないときは諦める */ } };
+export const queued = () => qLoad();
+export async function flushQueue() {
+  if (DEMO) return { sent: 0, left: 0, failed: 0 };
+  let q = qLoad(); let sent = 0;
+  for (const it of [...q]) {
+    try { await rest('ledger_entries', { method: 'POST', prefer: 'return=minimal', body: it.body }); sent++; q = q.filter(x => x.body.id !== it.body.id); }
+    catch (e) {
+      if (e.code === 'net' || e.code === 'auth') break;
+      if (/duplicate key/i.test(e.message)) { q = q.filter(x => x.body.id !== it.body.id); sent++; continue; }
+      it.error = e.message; q = q.map(x => (x.body.id === it.body.id ? it : x));
+    }
+  }
+  qSave(q);
+  return { sent, left: q.length, failed: q.filter(x => x.error).length };
+}
+
 const real = {
   isLoggedIn: () => !!sessionLoad(),
   email: () => (sessionLoad() || {}).email || '',
@@ -146,17 +166,19 @@ const real = {
     }));
   },
   async addEntry(e) {
-    await rest('ledger_entries', {
-      method: 'POST', prefer: 'return=minimal',
-      body: {
-        occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id || null,
-        memo: e.memo || null, payer_id: e.payer_id || null, party_id: e.party_id || null,
-        source: e.live_id ? 'live' : 'manual', live_id: e.live_id || null, posting: 'posted', created_by: e.by,
-      },
-    });
+    const body = {
+      id: crypto.randomUUID(),
+      occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id || null,
+      memo: e.memo || null, payer_id: e.payer_id || null, party_id: e.party_id || null,
+      source: e.live_id ? 'live' : 'manual', live_id: e.live_id || null, posting: 'posted', created_by: e.by,
+    };
+    try { await rest('ledger_entries', { method: 'POST', prefer: 'return=minimal', body }); return { queued: false }; }
+    catch (err) {
+      if (err.code !== 'net') throw err;
+      const q = qLoad(); q.push({ body, at: new Date().toISOString() }); qSave(q);
+      return { queued: true };
+    }
   },
-  reimburse: e => rest('rpc/app_reimburse', { method: 'POST', body: { p_party: e.party_id, p_amount: e.amount, p_date: e.date, p_memo: e.memo || null, p_by: e.by } }),
-  offset: e => rest('rpc/app_offset', { method: 'POST', body: { p_party: e.party_id, p_amount: e.amount, p_date: e.date, p_memo: e.memo || null, p_by: e.by } }),
   reverse: (id, by) => rest('rpc/app_reverse', { method: 'POST', body: { p_id: id, p_by: by } }),
   // 物販の売上(BASE・個別販売)を、注文・在庫・台帳へ一度に記録する
   merchSale: o => rest('rpc/app_merch_sale', { method: 'POST', body: { p_channel: o.channel, p_date: o.date, p_lines: o.lines, p_received: o.received, p_memo: o.memo || null, p_customer: o.customer || null, p_by: o.by } }),
@@ -166,6 +188,28 @@ const real = {
   airImports: () => rest('air_imports?select=file_name,target_month,baskets_new,imported_at&order=imported_at.desc&limit=12'),
   airImport: o => rest('rpc/app_air_import', { method: 'POST', body: { p_file_name: o.file_name, p_hash: o.hash, p_month: o.month, p_baskets: o.baskets, p_map: o.map, p_by: o.by } }),
   airLink: (date, live, by) => rest('rpc/app_air_link', { method: 'POST', body: { p_date: date, p_live: live || null, p_by: by } }),
+  // ---- 定期費用・テンプレート・バックアップ ----
+  recurring: () => rest('recurring_rules?select=*,category:categories(name),payer:people(name)&order=next_due'),
+  saveRule: (id, f) => rest(id ? `recurring_rules?id=eq.${id}` : 'recurring_rules', { method: id ? 'PATCH' : 'POST', prefer: 'return=minimal',
+    body: { name: f.name, every_n: f.every_n, unit: f.unit, next_due: f.next_due, amount: f.amount, category_id: f.category_id || null, payer_id: f.payer_id || null, is_active: f.is_active !== false } }),
+  postRecurring: o => rest('rpc/app_recurring_post', { method: 'POST', body: { p_rule: o.rule, p_date: o.date, p_skip: !!o.skip, p_by: o.by } }),
+  templates: () => rest('quick_templates?select=*&is_active=eq.true&order=use_count.desc,label'),
+  saveTemplate: (id, f) => rest(id ? `quick_templates?id=eq.${id}` : 'quick_templates', { method: id ? 'PATCH' : 'POST', prefer: 'return=minimal',
+    body: { label: f.label, kind: f.kind, category_id: f.category_id || null, amount: f.amount || null, memo: f.memo || null, payer_id: f.payer_id || null } }),
+  removeTemplate: id => rest(`quick_templates?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: { is_active: false } }),
+  useTemplate: (id, n) => rest(`quick_templates?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: { use_count: n + 1 } }).catch(() => {}),
+  async exportAll(progress) {
+    const T = ['people', 'categories', 'venues', 'settings', 'lives', 'ledger_entries', 'settlement_allocations', 'products', 'product_variants', 'stock_movements',
+      'air_imports', 'air_baskets', 'air_lines', 'air_item_map', 'merch_orders', 'merch_order_lines', 'base_payouts', 'recurring_rules', 'quick_templates', 'audit_log'];
+    const out = { app: 'withi-money', exported_at: new Date().toISOString(), tables: {} };
+    for (const t of T) {
+      if (progress) progress(t);
+      const rows = []; let off = 0;
+      for (;;) { const page = await rest(`${t}?select=*&order=id&limit=1000&offset=${off}`); rows.push(...page); if (page.length < 1000) break; off += 1000; }
+      out.tables[t] = rows;
+    }
+    return out;
+  },
   // ---- ライブ ----
   async lives() {
     const [rows, vs, ls] = await Promise.all([
@@ -268,7 +312,7 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]], { air_type1_role: 'color', air_type2_role: 'size' });
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5, air_type1_role: 'size', air_type2_role: null });
-  const MV = []; const ORD = new Map(); const LV = []; const AB = []; const AM = []; const AI = [];
+  const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -323,6 +367,17 @@ function makeDemo() {
       return { new: nw, skipped, lines: 0, stock_lines: stock, linked };
     },
     async airLink(date, live) { await wait(); let c = 0; for (const b of AB) if (b.sale_date === date) { b.live_id = live || null; c++; } return c; },
+    async recurring() { await wait(); return RR.map(r => ({ ...r, category: { name: (CATS.find(c => c.id === r.category_id) || {}).name }, payer: r.payer_id ? { name: (P.find(p => p.id === r.payer_id) || {}).name } : null })); },
+    async saveRule(id, f) { await wait(); const o = { name: f.name, every_n: f.every_n, unit: f.unit, next_due: f.next_due, amount: f.amount, category_id: f.category_id || null, payer_id: f.payer_id || null, is_active: f.is_active !== false }; if (id) Object.assign(RR.find(r => r.id === id), o); else RR.push({ id: 'r' + (++n), ...o }); },
+    async postRecurring(o) {
+      await wait(); const r = RR.find(x => x.id === o.rule); if (!o.skip) add({ occurred_on: o.date, kind: r.payer_id ? 'expense_advanced' : 'expense_fund', amount: r.amount, category_id: r.category_id, memo: r.name, payer_id: r.payer_id, source: 'recurring' });
+      const d = new Date(r.next_due + 'T00:00:00'); if (r.unit === 'year') d.setFullYear(d.getFullYear() + r.every_n); else d.setMonth(d.getMonth() + r.every_n); r.next_due = ymd(d); return r.next_due;
+    },
+    async templates() { await wait(); return TP.filter(t => t.is_active).sort((a, b) => b.use_count - a.use_count); },
+    async saveTemplate(id, f) { await wait(); const o = { label: f.label, kind: f.kind, category_id: f.category_id || null, amount: f.amount || null, memo: f.memo || null, payer_id: f.payer_id || null }; if (id) Object.assign(TP.find(t => t.id === id), o); else TP.push({ id: 't' + (++n), use_count: 0, is_active: true, ...o }); },
+    async removeTemplate(id) { await wait(); TP.find(t => t.id === id).is_active = false; },
+    async useTemplate(id) { const t = TP.find(x => x.id === id); if (t) t.use_count++; },
+    async exportAll() { await wait(); return { app: 'withi-money', demo: true, exported_at: new Date().toISOString(), tables: { ledger_entries: E } }; },
     async liveRating() { return null; },
     async venues() { await wait(); return [...new Set(LV.map(l => l.venue).filter(Boolean))].map(n => ({ id: n, name: n, prefecture: '鹿児島' })); },
     async addLive(f) { await wait(); const id = 'L' + (++n); LV.push({ id, live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue: f.venue || '', memo: f.memo || '', status: 'draft', score: null }); return id; },

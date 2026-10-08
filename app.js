@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd } from './api.js?v=10';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=10';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=11';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=11';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -68,6 +68,7 @@ function chips(items, selected, onPick, opt = {}) {
     }, h('span', { class: 'chip-main' }, it.label), it.sub ? h('span', { class: 'chip-sub' }, it.sub) : null)));
   };
   draw(selected);
+  wrap.select = draw;
   return wrap;
 }
 function amountField(init) {
@@ -125,7 +126,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-10'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-11'),
   ]);
 }
 
@@ -151,10 +152,22 @@ async function homeView() {
   try {
     const d = await api.home();
     if (my !== renderId) return;
+    const rules = await api.recurring().catch(() => []);
+    const dueRules = rules.filter(r => r.is_active && String(r.next_due).slice(0, 10) <= ymd());
+    const pend = queued();
+    const bd = DEMO ? 0 : daysSince(lastBackup());
     const payable = d.balances.reduce((s, b) => s + b.withi_owes, 0);
     const recv = d.balances.reduce((s, b) => s + b.owes_withi, 0);
     const btn = (cls, ico, label, href, sub) => h(href ? 'a' : 'div', { class: 'qa ' + cls + (href ? '' : ' soon'), href }, h('span', { class: 'qa-ico' }, ico), h('span', { class: 'qa-label' }, label), sub ? h('span', { class: 'qa-sub' }, sub) : null);
     body.replaceChildren(
+      pend.length ? h('section', { class: 'card', style: 'border-color:var(--yellow)' }, h('div', { class: 'cap' }, `⏳ 未送信の記録 ${pend.length}件`),
+        h('p', { class: 'hint' }, '電波がなかったため、スマホに一時保存しています。つながると自動で送ります。'),
+        h('button', { class: 'btn small', onclick: async () => { const r = await flushQueue(); toast(r.left ? `${r.sent}件送りました。残り${r.left}件` : '送りました', r.left ? 'err' : 'ok'); homeView(); } }, '今すぐ送る')) : null,
+      dueRules.length ? h('section', { class: 'card', style: 'border-color:var(--pink)' }, h('div', { class: 'cap' }, `🔁 定期費用の支払い日です(${dueRules.length}件)`),
+        ...dueRules.slice(0, 5).map(r => h('div', { class: 'brow' }, h('span', {}, `${r.name} ${yen(r.amount)}`, h('small', { style: 'display:block;color:var(--muted)' }, dshow(r.next_due) + (r.payer ? ' ・' + r.payer.name + 'が立替' : ''))),
+          h('span', {}, h('button', { class: 'undo', onclick: async () => { if (!state.by) { await pickBy(true); if (!state.by) return; } try { await api.postRecurring({ rule: r.id, date: String(r.next_due).slice(0, 10), skip: false, by: state.by }); getFx('−' + yen(r.amount), r.payer ? '立替を記録' : 'PAID'); homeView(); } catch (e) { toast(errMsg(e), 'err'); } } }, '記録する'),
+            h('button', { class: 'undo', onclick: async () => { if (await confirmBox('今回はとばす？', `${r.name} ${dshow(r.next_due)} 分は記録せず、次の回に進めます。`, 'とばす')) { try { await api.postRecurring({ rule: r.id, date: String(r.next_due).slice(0, 10), skip: true, by: state.by }); homeView(); } catch (e) { toast(errMsg(e), 'err'); } } } }, 'とばす'))))) : null,
+      !DEMO && (bd == null || bd >= 30) ? h('a', { class: 'card', href: '#/backup', style: 'display:block' }, h('div', { class: 'cap' }, '💾 バックアップ'), h('p', { class: 'hint' }, bd == null ? 'まだバックアップを作っていません。タップして作る' : `最後のバックアップから${bd}日たっています。タップして作る`)) : null,
       h('section', { class: 'card fund' }, h('div', { class: 'cap' }, '💰 現在のWiθ資金'), h('div', { class: 'big' + (d.fund < 0 ? ' neg' : '') }, yen(d.fund))),
       h('section', { class: 'card' }, h('div', { class: 'cap' }, '📈 THIS MONTH'),
         h('div', { class: 'trio' },
@@ -170,11 +183,20 @@ async function homeView() {
         btn('in', '💰', 'お金が入った', '#/in'), btn('out', '💸', 'お金を使った', '#/out'),
         btn('loan', '👤', 'メンバーがWiθのお金を借りた', '#/loan?mode=loan'), btn('repay', '💵', 'メンバーが返済した', '#/loan?mode=repay'),
         btn('reim', '🔁', '立替を返す・相殺', '#/loan?mode=reimburse'), btn('hist', '📜', '履歴・取消', '#/history'),
-        btn('live', '🎸', 'ライブ', '#/live-list'), btn('merch', '👕', '商品・在庫', '#/merch'), btn('air', '📥', 'Airレジ売上', '#/air')),
+        btn('live', '🎸', 'ライブ', '#/live-list'), btn('merch', '👕', '商品・在庫', '#/merch'), btn('air', '📥', 'Airレジ売上', '#/air'), btn('manage', '🛠️', '管理', '#/manage', '定期費用・テンプレ・バックアップ')),
       d.balances.some(b => b.owes_withi || b.withi_owes) ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '👥 メンバーごと'),
         d.balances.filter(b => b.owes_withi || b.withi_owes).map(b => h('div', { class: 'brow' }, h('span', {}, b.name),
           h('span', {}, b.owes_withi ? h('i', { class: 'tag recv' }, '借入 ' + yen(b.owes_withi)) : null, b.withi_owes ? h('i', { class: 'tag pay' }, '未払い ' + yen(b.withi_owes)) : null)))) : null);
-  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, homeView)); }
+  } catch (e) {
+    if (my !== renderId) return;
+    if (e && e.code === 'net') {
+      const q = (cls, ico, label, href) => h('a', { class: 'qa ' + cls, href }, h('span', { class: 'qa-ico' }, ico), h('span', { class: 'qa-label' }, label));
+      body.replaceChildren(h('section', { class: 'card', style: 'border-color:var(--yellow)' }, h('div', { class: 'cap' }, '📴 いまは電波がありません'),
+        h('p', { class: 'hint' }, '残高は表示できませんが、収入・支出は記録できます。スマホに保存し、つながると自動で送ります。' + (queued().length ? `(未送信 ${queued().length}件)` : ''))),
+        h('div', { class: 'qa-grid' }, q('in', '💰', 'お金が入った', '#/in'), q('out', '💸', 'お金を使った', '#/out')),
+        h('button', { class: 'btn ghost', style: 'width:100%;margin-top:12px', onclick: homeView }, 'もう一度読み込む'));
+    } else body.replaceChildren(errorBox(e, homeView));
+  }
 }
 
 // ---------- お金が入った / 使った ----------
@@ -191,6 +213,25 @@ function moneyView(isIn, plain) {
   const setHint = () => { payerHint.textContent = f.payer ? `立替: Wiθの資金は減らず、${nameOf(f.payer)}への未払い（返す義務）になります。精算ステータスは「未精算」から始まります。` : 'Wiθの資金から支払います。資金が減ります。'; };
   setHint();
   const submit = h('button', { class: 'btn big ' + (isIn ? 'in' : 'out'), type: 'submit' }, isIn ? '💰 記録する' : '💸 記録する');
+  let usedTpl = null;
+  const catChips = chips(cats.map(c => ({ id: c.id, label: c.name })), '', id => {
+    const nm = (cats.find(c => c.id === id) || {}).name;
+    if (isIn && !plain && (nm === 'BASE' || nm === '物販(個別販売)')) { location.hash = '#/sale?ch=' + (nm === 'BASE' ? 'base' : 'direct'); return; }
+    f.cat = id;
+  });
+  const payerChips = chips(payers, '', id => { f.payer = id; setHint(); });
+  const tplBox = h('div', {});
+  api.templates().then(ts => {
+    const mine = ts.filter(t => t.kind === (isIn ? 'income' : 'expense'));
+    if (!mine.length) return;
+    tplBox.replaceChildren(h('div', { class: 'field' }, h('span', { class: 'field-label' }, '⭐ よく使う'), h('div', { class: 'chips' }, mine.map(t => h('button', { type: 'button', class: 'chip', onclick: () => {
+      usedTpl = t;
+      if (t.category_id && cats.some(c => c.id === t.category_id)) { f.cat = t.category_id; catChips.select(t.category_id); }
+      if (t.amount) amt.set(t.amount);
+      memo.value = t.memo || '';
+      if (!isIn) { f.payer = t.payer_id || ''; payerChips.select(f.payer); setHint(); }
+    } }, t.label)))));
+  }).catch(() => {});
   const form = h('form', { class: 'form', onsubmit: async ev => {
     ev.preventDefault(); msg.textContent = '';
     const a = amt.get();
@@ -199,20 +240,20 @@ function moneyView(isIn, plain) {
     if (!state.by) { await pickBy(true); if (!state.by) return; }
     submit.disabled = true;
     try {
-      await api.addEntry({ date: date.value, kind: isIn ? 'income' : (f.payer ? 'expense_advanced' : 'expense_fund'), amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), by: state.by });
-      getFx(isIn ? `+${yen(a)}` : `−${yen(a)}`, isIn ? 'MONEY GET!' : (f.payer ? '立替を記録' : 'PAID'));
+      const res = await api.addEntry({ date: date.value, kind: isIn ? 'income' : (f.payer ? 'expense_advanced' : 'expense_fund'), amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), by: state.by });
+      if (usedTpl) api.useTemplate(usedTpl.id, usedTpl.use_count || 0);
+      if (res && res.queued) toast('電波がないため、保存待ちにしました。つながると自動で送ります', 'ok');
+      else getFx(isIn ? `+${yen(a)}` : `−${yen(a)}`, isIn ? 'MONEY GET!' : (f.payer ? '立替を記録' : 'PAID'));
       location.hash = '#/home';
     } catch (e) { msg.textContent = errMsg(e); submit.disabled = false; }
   } },
-  field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), '', id => {
-    const nm = (cats.find(c => c.id === id) || {}).name;
-    if (isIn && !plain && (nm === 'BASE' || nm === '物販(個別販売)')) { location.hash = '#/sale?ch=' + (nm === 'BASE' ? 'base' : 'direct'); return; }
-    f.cat = id;
-  })),
+  tplBox,
+  field(isIn ? 'どこから？' : 'なにに？', catChips),
   isIn && !plain ? h('p', { class: 'hint' }, 'BASE・物販(個別販売)を選ぶと、商品と在庫つきで記録する画面に進みます。') : null,
   field('金額', amt.el), field('内容', memo), field('日付', date),
-  isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), chips(payers, '', id => { f.payer = id; setHint(); }), payerHint),
-  msg, submit);
+  isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), payerChips, payerHint),
+  msg, submit,
+  h('button', { type: 'button', class: 'btn ghost', style: 'width:100%', onclick: () => saveTplModal({ kind: isIn ? 'income' : 'expense', category_id: f.cat, amount: amt.get(), memo: memo.value.trim(), payer_id: f.payer }) }, '⭐ この内容をテンプレートに保存'));
   $app.replaceChildren(shell(isIn ? '💰 お金が入った' : '💸 お金を使った', form));
 }
 
@@ -836,6 +877,137 @@ async function airPreview(file, box, existing, reload, opt = {}) {
       opt.liveId ? h('button', { class: 'btn', onclick: async () => { try { await api.airLink(opt.date, opt.liveId, state.by); toast('このライブにひも付けました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); } } }, 'この日の会計をこのライブにひも付ける') : null)));
 }
 
+// ---------- 管理: 定期費用・テンプレート・バックアップ ----------
+const lastBackup = () => { try { return localStorage.getItem('withi_last_backup') || ''; } catch { return ''; } };
+const daysSince = iso => (iso ? Math.floor((Date.now() - Date.parse(iso)) / 86400000) : null);
+
+function manageView() {
+  ++renderId;
+  const lb = lastBackup(); const d = daysSince(lb);
+  const row = (ico, label, sub, href) => h('a', { class: 'lrow', href }, h('span', { class: 'lico' }, ico), h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, label), h('div', { class: 'lsub' }, sub)), h('span', { class: 'lamt' }, '›'));
+  $app.replaceChildren(shell('🛠️ 管理', h('div', {},
+    row('🔁', '定期費用', '毎月・毎年かかる費用を登録。期限が来たらホームでお知らせ', '#/recurring'),
+    row('⭐', 'テンプレート', 'よく使う入力を1タップで呼び出す', '#/templates'),
+    row('💾', 'バックアップ', lb ? `最後に作った日: ${dshow(lb)}（${d}日前）` : 'まだ作っていません', '#/backup'))));
+}
+
+function ruleModal(rule, done) {
+  const cats = state.cats.filter(c => c.group_name === 'general' && c.flow === 'expense' && c.name !== 'STS取り分');
+  const f = { cat: rule ? rule.category_id || '' : '', payer: rule ? rule.payer_id || '' : '', unit: rule ? rule.unit : 'month' };
+  const name = h('input', { type: 'text', placeholder: '例: Spotify・ドメイン代', autocomplete: 'off', value: rule ? rule.name : '' });
+  const amt = amountField(rule ? rule.amount : 0); const every = intField(rule ? rule.every_n : 1, '1');
+  const due = h('input', { type: 'date', value: rule ? String(rule.next_due).slice(0, 10) : ymd() });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const payers = [{ id: '', label: 'Wiθ資金' }, ...state.people.filter(p => p.can_pay).map(p => ({ id: p.id, label: p.name }))];
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = ''; const n = numOrNull(every);
+    if (!name.value.trim()) { msg.textContent = '名前を入れてください'; return; }
+    if (!(amt.get() > 0)) { msg.textContent = '金額を入れてください'; return; }
+    if (!(n >= 1)) { msg.textContent = '間隔は1以上にしてください'; return; }
+    if (!due.value) { msg.textContent = '次の支払日を入れてください'; return; }
+    ok.disabled = true;
+    try { await api.saveRule(rule && rule.id, { name: name.value.trim(), every_n: n, unit: f.unit, next_due: due.value, amount: amt.get(), category_id: f.cat, payer_id: f.payer, is_active: true }); m.close(); toast('保存しました', 'ok'); done(); }
+    catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '保存する');
+  const m = modal([h('h3', {}, rule ? '定期費用を編集' : '定期費用を追加'), field('名前', name),
+    field('なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), f.cat, id => { f.cat = id; })),
+    field('金額', amt.el),
+    field('くり返し', chips([{ id: 'month', label: 'ヶ月ごと' }, { id: 'year', label: '年ごと' }], f.unit, id => { f.unit = id; })), field('間隔(数)', every, '例: 毎月なら「ヶ月ごと」で1、半年ごとなら6'),
+    field('次の支払日', due), h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払う？'), chips(payers, f.payer, id => { f.payer = id; })), msg, ok]);
+}
+
+async function recurringView() {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('🔁 定期費用', body, '#/manage'));
+  try {
+    const rules = await api.recurring();
+    if (my !== renderId) return;
+    const reload = () => recurringView();
+    const today = ymd();
+    const rows = rules.map(r => {
+      const due = String(r.next_due).slice(0, 10); const over = r.is_active && due <= today;
+      return h('div', { class: 'lrow' + (r.is_active ? '' : ' dead') },
+        h('span', { class: 'lico' }, '🔁'),
+        h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, r.name),
+          h('div', { class: 'lsub' }, [r.category && r.category.name, `${r.every_n}${r.unit === 'year' ? '年' : 'ヶ月'}ごと`, r.payer ? r.payer.name + 'が立替' : 'Wiθ資金'].filter(Boolean).join(' · ')),
+          h('div', { class: 'ltags' }, h('i', { class: 'tag ' + (over ? 'pay' : 'recv') }, '次: ' + dshow(due)), !r.is_active ? h('i', { class: 'tag dead' }, '停止中') : null)),
+        h('div', { class: 'lamt neg' }, yen(r.amount)),
+        h('button', { class: 'undo', onclick: () => ruleModal(r, reload) }, '編集'),
+        r.is_active ? h('button', { class: 'undo', onclick: async () => { if (await confirmBox('停止する？', `${r.name} を停止します。(これまでの記録は残ります)`, '停止する')) { try { await api.saveRule(r.id, { ...r, category_id: r.category_id, is_active: false }); reload(); } catch (e) { toast(errMsg(e), 'err'); } } } }, '停止')
+          : h('button', { class: 'undo', onclick: async () => { try { await api.saveRule(r.id, { ...r, is_active: true }); reload(); } catch (e) { toast(errMsg(e), 'err'); } } }, '再開'));
+    });
+    body.replaceChildren(h('button', { class: 'btn big', style: 'width:100%', onclick: () => ruleModal(null, reload) }, '＋ 定期費用を追加'),
+      h('p', { class: 'hint' }, '支払日が来ると、ホームに「記録する／今回はとばす」が出ます。自動でお金は動かしません。'),
+      ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだ登録がありません。')]));
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, recurringView)); }
+}
+
+function saveTplModal(init, done) {
+  const label = h('input', { type: 'text', placeholder: '例: 駐車場代', autocomplete: 'off', value: init.label || (init.category_id ? ((state.cats.find(c => c.id === init.category_id) || {}).name || '') : '') });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    if (!label.value.trim()) { msg.textContent = '名前を入れてください'; return; }
+    ok.disabled = true;
+    try { await api.saveTemplate(init.id, { ...init, label: label.value.trim() }); m.close(); toast('テンプレートに保存しました', 'ok'); if (done) done(); }
+    catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '保存する');
+  const m = modal([h('h3', {}, 'テンプレートに保存'), h('p', { class: 'muted' }, `${init.kind === 'income' ? '収入' : '支出'} ・ ${init.amount ? yen(init.amount) : '金額なし'}` + (init.memo ? ' ・ ' + init.memo : '')), field('ボタンの名前', label), msg, ok]);
+}
+
+async function templatesView() {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('⭐ テンプレート', body, '#/manage'));
+  try {
+    const ts = await api.templates();
+    if (my !== renderId) return;
+    const reload = () => templatesView();
+    const rows = ts.map(t => h('div', { class: 'lrow' },
+      h('span', { class: 'lico' }, t.kind === 'income' ? '💰' : '💸'),
+      h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, t.label), h('div', { class: 'lsub' }, [(state.cats.find(c => c.id === t.category_id) || {}).name, t.amount ? yen(t.amount) : '', t.payer_id ? nameOf(t.payer_id) + 'が立替' : ''].filter(Boolean).join(' · ') || ' ')),
+      h('button', { class: 'undo', onclick: () => saveTplModal({ ...t }, reload) }, '名前'),
+      h('button', { class: 'undo', onclick: async () => { if (await confirmBox('削除する？', t.label, '削除する')) { try { await api.removeTemplate(t.id); reload(); } catch (e) { toast(errMsg(e), 'err'); } } } }, '削除')));
+    body.replaceChildren(h('p', { class: 'hint' }, '「お金が入った」「お金を使った」の入力画面で、内容を入れたあとに「⭐ テンプレートに保存」を押すと、ここに増えます。'),
+      ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだテンプレートがありません。')]));
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, templatesView)); }
+}
+
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = h('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+const csvCell = v => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? '"' + t.replaceAll('"', '""') + '"' : t; };
+
+function backupView() {
+  ++renderId;
+  const lb = lastBackup(); const d = daysSince(lb);
+  const st = h('p', { class: 'hint' }, ''); const msg = h('p', { class: 'form-err', role: 'alert' });
+  const run = async mode => {
+    msg.textContent = ''; st.textContent = '読み込み中…';
+    try {
+      const all = await api.exportAll(t => { st.textContent = '読み込み中… ' + t; });
+      const stamp = ymd().replaceAll('-', '');
+      if (mode === 'json') download(`withi-money-backup-${stamp}.json`, JSON.stringify(all), 'application/json');
+      else {
+        const rows = all.tables.ledger_entries || []; const cols = ['occurred_on', 'kind', 'amount', 'category_id', 'memo', 'payer_id', 'party_id', 'live_id', 'source', 'is_historical', 'reverses_id', 'created_at'];
+        const cn = new Map((all.tables.categories || []).map(c => [c.id, c.name])); const pn = new Map((all.tables.people || []).map(p => [p.id, p.name]));
+        const head = ['日付', '種類', '金額', 'カテゴリ', 'メモ', '立替者', '相手', 'ライブID', '元', '過去データ', '取消の対象', '記録日時'];
+        const body = rows.map(r => cols.map(c => csvCell(c === 'category_id' ? cn.get(r[c]) : (c === 'payer_id' || c === 'party_id') ? pn.get(r[c]) : r[c])).join(','));
+        download(`withi-money-ledger-${stamp}.csv`, '﻿' + [head.join(','), ...body].join('\n'), 'text/csv');
+      }
+      try { localStorage.setItem('withi_last_backup', new Date().toISOString()); } catch { /* 記録できなくても続行 */ }
+      st.textContent = '✅ ダウンロードしました。ファイルは「ファイル」アプリなどに保存されます。Googleドライブなど、スマホ以外の場所にも置いておくと安心です。';
+    } catch (e) { st.textContent = ''; msg.textContent = errMsg(e); }
+  };
+  $app.replaceChildren(shell('💾 バックアップ', h('div', {},
+    h('section', { class: 'card' }, h('div', { class: 'cap' }, '最後に作った日'), h('b', {}, lb ? `${dshow(lb)}（${d}日前）` : 'まだ作っていません'),
+      h('p', { class: 'hint' }, 'すべての記録(お金・ライブ・商品・在庫・Airレジ・定期費用など)を1つのファイルにまとめます。月に1回くらい作るのがおすすめです。')),
+    h('button', { class: 'btn big', style: 'width:100%', onclick: () => run('json') }, '💾 すべてのデータをダウンロード (JSON)'),
+    h('button', { class: 'btn ghost', style: 'width:100%;margin-top:10px', onclick: () => run('csv') }, '📄 お金の記録だけをCSVで (Excel等で開けます)'),
+    st, msg), '#/manage'));
+}
+
 // ---------- ルーター ----------
 function parseHash() {
   const raw = location.hash.replace(/^#/, '') || '/home';
@@ -854,6 +1026,10 @@ async function route() {
   if (path === '/out') return moneyView(false);
   if (path === '/loan') return loanView(q.get('mode') || 'loan');
   if (path === '/history') return historyView();
+  if (path === '/manage') return manageView();
+  if (path === '/recurring') return recurringView();
+  if (path === '/templates') return templatesView();
+  if (path === '/backup') return backupView();
   if (path === '/air') return airView();
   if (path === '/live-list') return liveListView();
   if (path === '/live') return liveView(q.get('id'));
@@ -862,10 +1038,18 @@ async function route() {
   return homeView();
 }
 async function boot() {
-  [state.people, state.cats] = await Promise.all([api.people(), api.categories()]);
+  try {
+    [state.people, state.cats] = await Promise.all([api.people(), api.categories()]);
+    try { localStorage.setItem('withi_cache_pc', JSON.stringify({ p: state.people, c: state.cats })); } catch { /* 無くても動く */ }
+  } catch (e) {
+    let c = null; try { c = JSON.parse(localStorage.getItem('withi_cache_pc')); } catch { /* なし */ }
+    if (e && e.code === 'net' && c && c.p && c.c) { state.people = c.p; state.cats = c.c; } else throw e;
+  }
   try { state.rating = await api.liveRating(); } catch { /* 既定値を使う */ }
 }
 window.addEventListener('hashchange', route);
+window.addEventListener('online', () => { flushQueue().then(r => { if (r.sent) toast(`保存待ちの${r.sent}件を送りました`, 'ok'); }).catch(() => {}); });
+flushQueue().catch(() => {});
 route(); // module script は DOM 構築後に実行される
 
 if ('serviceWorker' in navigator && !DEMO && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js').catch(() => {});
