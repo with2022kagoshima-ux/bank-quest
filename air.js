@@ -1,5 +1,5 @@
 // Airレジ 月次CSVの読み込み(画面側で解析する。サーバーには整えた結果だけ送る)
-import { normName } from './api.js?v=17';
+import { normName } from './api.js?v=18';
 
 export function decodeCsv(buf) {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^﻿/, ''); }

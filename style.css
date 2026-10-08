@@ -137,3 +137,6 @@ input[type=date]{color-scheme:dark}
 .saleline .amount-wrap.small input{background:transparent;border:0;box-shadow:none;padding:6px 0;outline:none}
 .sel{width:100%;background:var(--bg2);color:var(--text,#fff);border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;font-size:15px;max-width:100%}
 .saleline .sel{grid-column:1 / -1}
+
+.pimg{width:44px;height:44px;border-radius:10px;object-fit:cover;background:#fff1;flex:none}
+.pimg.big{width:100%;max-width:260px;height:auto;aspect-ratio:1;display:block;margin:0 auto 12px;border-radius:14px}

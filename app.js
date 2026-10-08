@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=17';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=17';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=18';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=18';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -99,6 +99,14 @@ function shell(title, content, back = '#/home') {
       h('button', { class: 'bychip', onclick: openMenu, 'aria-label': '入力者を変更' }, '👤 ', by || '選ぶ')),
     h('main', {}, content));
 }
+// 商品写真(AIRレジの画像)。読み込めない時や写真が無い時は絵文字にもどす
+function thumb(p, big) {
+  const fb = () => h('span', { class: 'lico' }, '👕');
+  if (!p.image_url) return big ? null : fb();
+  const img = h('img', { class: big ? 'pimg big' : 'pimg', src: p.image_url, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+  img.addEventListener('error', () => { if (img.parentNode) img.replaceWith(...(big ? [] : [fb()])); });
+  return img;
+}
 function loading() { return h('div', { class: 'loading' }, h('div', { class: 'spin' }), '読み込み中…'); }
 function errorBox(e, retry) {
   return h('div', { class: 'errbox' }, h('p', {}, '⚠️ ' + errMsg(e)),
@@ -126,7 +134,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-17'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-18'),
   ]);
 }
 
@@ -375,7 +383,7 @@ async function merchView() {
       box.replaceChildren(...(rows.length ? rows.map(p => {
         const tot = totalStock(p);
         return h('a', { class: 'lrow', href: '#/product?id=' + p.id },
-          h('span', { class: 'lico' }, '👕'),
+          thumb(p),
           h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, p.name),
             h('div', { class: 'lsub' }, [p.category, p.variants.length > 1 ? p.variants.length + '種類' : ''].filter(Boolean).join(' · ') || ' '),
             h('div', { class: 'ltags' }, !p.is_active ? h('i', { class: 'tag dead' }, '販売終了') : null, p.co_share ? h('i', { class: 'tag mid' }, '共同 ' + Math.round(p.co_share * 100) + '%') : null)),
@@ -422,6 +430,7 @@ async function productView(pid) {
     if (!p) { body.replaceChildren(h('p', { class: 'empty' }, '商品が見つかりません。')); return; }
     const reload = () => productView(pid);
     const head = h('section', { class: 'card' },
+      thumb(p, true),
       h('div', { class: 'lmemo' }, p.name), h('div', { class: 'lsub' }, p.category || '(カテゴリなし)'),
       h('div', { class: 'ltags' }, !p.is_active ? h('i', { class: 'tag dead' }, '販売終了') : null, p.co_share ? h('i', { class: 'tag mid' }, '共同 ' + Math.round(p.co_share * 100) + '%') : null),
       h('button', { class: 'btn small', style: 'margin-top:10px', onclick: () => editProductModal(p, reload) }, '商品名・販売状態を変える'));
