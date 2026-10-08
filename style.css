@@ -117,8 +117,8 @@ input[type=date]{color-scheme:dark}
 .spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--cyan);animation:sp 0.8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 .errbox{text-align:center;padding:24px 8px}
-.modal-back{position:fixed;inset:0;background:#000a;display:flex;align-items:flex-end;justify-content:center;z-index:50}
-.modal{width:100%;max-width:520px;background:var(--bg2);border:1px solid var(--line);border-radius:22px 22px 0 0;padding:20px 18px calc(var(--safe-b) + 20px);display:flex;flex-direction:column;gap:12px;white-space:pre-line}
+.modal-back{position:fixed;inset:0;overscroll-behavior:contain;touch-action:none;background:#000a;display:flex;align-items:flex-end;justify-content:center;z-index:50}
+.modal{width:100%;max-width:520px;max-height:88vh;max-height:88dvh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;background:var(--bg2);border:1px solid var(--line);border-radius:22px 22px 0 0;padding:20px 18px calc(var(--safe-b) + 20px);display:flex;flex-direction:column;gap:12px;white-space:pre-line}
 .modal h3{margin:0}.modal p{margin:0}.modal .row{display:flex;gap:10px}.modal .row .btn{flex:1}
 .ver{color:var(--muted);font-size:12px;text-align:center}
 .toast{position:fixed;left:50%;bottom:calc(var(--safe-b) + 24px);transform:translate(-50%,20px);opacity:0;background:var(--card);border:1px solid var(--line);padding:12px 18px;border-radius:14px;font-weight:700;z-index:80;transition:.25s;max-width:90vw}
@@ -149,3 +149,5 @@ input[type=date]{color-scheme:dark}
 .rx{position:absolute;top:2px;right:2px;width:24px;height:24px;border-radius:50%;border:0;background:#000b;color:#fff;font-size:12px;line-height:1;cursor:pointer}
 
 .brow.due{flex-wrap:wrap;gap:8px}.brow.due>span:first-child{flex:1 1 100%}.brow.due>span:last-child{display:flex;gap:8px;width:100%}.brow.due .undo{flex:1;min-height:44px}
+
+body:has(.modal-back){overflow:hidden}.modal{touch-action:pan-y}
