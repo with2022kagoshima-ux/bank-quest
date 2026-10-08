@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd } from './api.js';
+import { api, DEMO, ApiError, ymd } from './api.js?v=7';
 
 const $app = document.getElementById('app');
 const yen = n => (n < 0 ? '−' : '') + '¥' + Math.abs(Math.round(n)).toLocaleString('ja-JP');
