@@ -27,6 +27,23 @@ export const EFFECT = {
   opening_payable:    a => ({ payable: +a }),
 };
 
+
+// ---------- 商品の共通処理 ----------
+export const normName = s => String(s).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+const SZ = ['S', 'M', 'L', 'XL', 'XXL', 'MENS', 'WOMENS'];
+const szRank = s => { const i = SZ.indexOf(s); return i < 0 ? 99 : i; };
+export function groupProducts(vs) {
+  const m = new Map();
+  for (const v of vs) {
+    const p = v.product; if (!p) continue;
+    if (!m.has(p.id)) m.set(p.id, { ...p, variants: [] });
+    m.get(p.id).variants.push({ id: v.id, size: v.size, color: v.color, price: v.price, cost: v.cost, is_active: v.is_active, stock: v.stock });
+  }
+  const out = [...m.values()];
+  for (const p of out) p.variants.sort((x, y) => String(x.color || '').localeCompare(String(y.color || ''), 'ja') || szRank(x.size) - szRank(y.size));
+  return out.sort((x, y) => x.name.localeCompare(y.name, 'ja'));
+}
+
 // =====================================================================
 //  Supabase 版
 // =====================================================================
@@ -141,6 +158,24 @@ const real = {
   reimburse: e => rest('rpc/app_reimburse', { method: 'POST', body: { p_party: e.party_id, p_amount: e.amount, p_date: e.date, p_memo: e.memo || null, p_by: e.by } }),
   offset: e => rest('rpc/app_offset', { method: 'POST', body: { p_party: e.party_id, p_amount: e.amount, p_date: e.date, p_memo: e.memo || null, p_by: e.by } }),
   reverse: (id, by) => rest('rpc/app_reverse', { method: 'POST', body: { p_id: id, p_by: by } }),
+  // ---- 商品・在庫 ----
+  async products() {
+    const [vs, st] = await Promise.all([
+      rest('product_variants?select=id,size,color,price,cost,is_active,product:products(id,name,category,is_active,image_url,co_share)'),
+      rest('v_stock_levels?select=variant_id,stock'),
+    ]);
+    const stock = new Map(st.map(s => [s.variant_id, Number(s.stock)]));
+    return groupProducts(vs.map(v => ({ ...v, stock: stock.get(v.id) || 0 })));
+  },
+  saveVariant: (id, f) => rest(`product_variants?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: { price: f.price, cost: f.cost, is_active: f.is_active } }),
+  saveProduct: (id, f) => rest(`products?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: { name: f.name, name_norm: normName(f.name), category: f.category || null, is_active: f.is_active } }),
+  addVariant: (pid, f) => rest('product_variants', { method: 'POST', prefer: 'return=minimal', body: { product_id: pid, size: f.size || null, color: f.color || null, price: f.price, cost: f.cost } }),
+  async addProduct(f) {
+    const r = await rest('products', { method: 'POST', prefer: 'return=representation', body: { name: f.name, name_norm: normName(f.name), category: f.category || null, has_size: !!f.size, has_color: !!f.color } });
+    await rest('product_variants', { method: 'POST', prefer: 'return=minimal', body: { product_id: r[0].id, size: f.size || null, color: f.color || null, price: f.price, cost: f.cost } });
+  },
+  stockMove: m => rest('stock_movements', { method: 'POST', prefer: 'return=minimal', body: { variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo || null, created_by: m.by } }),
+  stockHistory: vid => rest(`stock_movements?select=qty,reason,occurred_on,memo&variant_id=eq.${vid}&order=occurred_on.desc,created_at.desc&limit=30`),
 };
 
 // =====================================================================
@@ -176,6 +211,16 @@ function makeDemo() {
     .map(e => { const s = A.filter(a => a.adv === e.id).reduce((q, a) => q + a.amount, 0); return { advanced_entry_id: e.id, payer_id: e.payer_id, occurred_on: e.occurred_on, remaining: e.amount - s, status: s === 0 ? '未精算' : s >= e.amount ? '精算済み' : '一部精算' }; });
   const alloc = (rid, party, amount) => { let left = amount; for (const a of adv().filter(x => x.payer_id === party && x.remaining > 0).sort((a, b) => a.occurred_on.localeCompare(b.occurred_on))) { if (left <= 0) break; const take = Math.min(left, a.remaining); A.push({ rid, adv: a.advanced_entry_id, amount: take }); left -= take; } };
   const wait = async () => { await new Promise(r => setTimeout(r, 120)); };
+  // 商品・在庫(デモ)
+  let vn = 0;
+  const PR = [];
+  const mkp = (name, category, vars, extra = {}) => { const p = { id: 'pr' + (PR.length + 1), name, category, is_active: true, image_url: null, ...extra }; PR.push({ p, vars: vars.map(([size, color, price, cost, stock]) => ({ id: 'v' + (++vn), size, color, price, cost, is_active: true, stock })) }); };
+  mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
+  mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]]);
+  mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5 });
+  const MV = [];
+  const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
+
   return {
     isLoggedIn: () => true, email: () => 'demo@example.com', login: async () => {}, logout() {},
     async people() { await wait(); return P; }, async categories() { await wait(); return CATS; },
@@ -202,6 +247,14 @@ function makeDemo() {
     async addEntry(e) { await wait(); add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id }); },
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
     async offset(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable || e.amount > b.recv) throw new ApiError(`相殺できるのは、未払い残(${b.payable}円)と借入残(${b.recv}円)の小さい方までです`); const r = add({ occurred_on: e.date, kind: 'offset', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
+
+    async products() { await wait(); return groupProducts(allV().map(v => ({ ...v, stock: v.stock }))); },
+    async saveVariant(id, f) { await wait(); const v = allV().find(x => x.id === id); const o = PR.flatMap(x => x.vars).find(x => x.id === id); Object.assign(o, { price: f.price, cost: f.cost, is_active: f.is_active }); return v; },
+    async saveProduct(id, f) { await wait(); const x = PR.find(y => y.p.id === id); Object.assign(x.p, { name: f.name, category: f.category, is_active: f.is_active }); },
+    async addVariant(pid, f) { await wait(); PR.find(y => y.p.id === pid).vars.push({ id: 'v' + (++vn), size: f.size || null, color: f.color || null, price: f.price, cost: f.cost, is_active: true, stock: 0 }); },
+    async addProduct(f) { await wait(); mkp(f.name, f.category || null, [[f.size || null, f.color || null, f.price, f.cost, 0]]); },
+    async stockMove(m) { await wait(); const o = PR.flatMap(x => x.vars).find(x => x.id === m.variant_id); o.stock += m.qty; MV.unshift({ variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo }); },
+    async stockHistory(vid) { await wait(); return MV.filter(x => x.variant_id === vid); },
     async reverse(rid) {
       await wait(); const e = E.find(x => x.id === rid);
       if (E.some(x => x.reverses_id === rid)) throw new ApiError('すでに取り消されています');

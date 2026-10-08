@@ -121,7 +121,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 1'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3'),
   ]);
 }
 
@@ -166,7 +166,7 @@ async function homeView() {
         btn('in', '💰', 'お金が入った', '#/in'), btn('out', '💸', 'お金を使った', '#/out'),
         btn('loan', '👤', 'メンバーがWiθのお金を借りた', '#/loan?mode=loan'), btn('repay', '💵', 'メンバーが返済した', '#/loan?mode=repay'),
         btn('reim', '🔁', '立替を返す・相殺', '#/loan?mode=reimburse'), btn('hist', '📜', '履歴・取消', '#/history'),
-        btn('live', '🎸', 'ライブを登録', null, 'Phase 4で追加'), btn('merch', '👕', '物販を見る', null, 'Phase 3で追加')),
+        btn('live', '🎸', 'ライブを登録', null, 'Phase 4で追加'), btn('merch', '👕', '商品・在庫', '#/merch')),
       d.balances.some(b => b.owes_withi || b.withi_owes) ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '👥 メンバーごと'),
         d.balances.filter(b => b.owes_withi || b.withi_owes).map(b => h('div', { class: 'brow' }, h('span', {}, b.name),
           h('span', {}, b.owes_withi ? h('i', { class: 'tag recv' }, '借入 ' + yen(b.owes_withi)) : null, b.withi_owes ? h('i', { class: 'tag pay' }, '未払い ' + yen(b.withi_owes)) : null)))) : null);
@@ -299,6 +299,169 @@ async function historyView(limit = 80) {
   } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, historyView)); }
 }
 
+
+// ---------- 商品・在庫 ----------
+const vLabel = v => [v.color, v.size].filter(Boolean).join(' ') || '(ひとつだけ)';
+const totalStock = p => p.variants.reduce((s, v) => s + (v.is_active ? v.stock : 0), 0);
+const intField = (init, ph) => h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', placeholder: ph || '0', value: init == null ? '' : String(init) });
+const numOrNull = el => { const d = el.value.replace(/[^0-9]/g, ''); return d === '' ? null : Number(d); };
+
+async function merchView() {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('👕 商品・在庫', body));
+  try {
+    const list = await api.products();
+    if (my !== renderId) return;
+    const q = h('input', { type: 'text', placeholder: '商品名で絞り込む', autocomplete: 'off' });
+    const box = h('div', {});
+    let showOld = false;
+    const draw = () => {
+      const t = q.value.trim().toLowerCase();
+      const rows = list.filter(p => (showOld || p.is_active) && (!t || p.name.toLowerCase().includes(t)));
+      box.replaceChildren(...(rows.length ? rows.map(p => {
+        const tot = totalStock(p);
+        return h('a', { class: 'lrow', href: '#/product?id=' + p.id },
+          h('span', { class: 'lico' }, '👕'),
+          h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, p.name),
+            h('div', { class: 'lsub' }, [p.category, p.variants.length > 1 ? p.variants.length + '種類' : ''].filter(Boolean).join(' · ') || ' '),
+            h('div', { class: 'ltags' }, !p.is_active ? h('i', { class: 'tag dead' }, '販売終了') : null, p.co_share ? h('i', { class: 'tag mid' }, '共同 ' + Math.round(p.co_share * 100) + '%') : null)),
+          h('div', { class: 'lamt ' + (tot <= 0 ? 'neg' : '') }, tot + '点'));
+      }) : [h('p', { class: 'empty' }, '該当する商品がありません。')]));
+    };
+    q.addEventListener('input', draw);
+    const total = list.filter(p => p.is_active).reduce((s, p) => s + totalStock(p), 0);
+    body.replaceChildren(
+      h('section', { class: 'card mini' }, h('div', { class: 'cap' }, '📦 販売中の在庫 合計'), h('b', {}, total + '点')),
+      h('div', { class: 'with-btn' }, q, h('button', { class: 'btn small', onclick: () => newProductModal() }, '＋商品')),
+      h('label', { class: 'hint' }, h('input', { type: 'checkbox', onchange: e => { showOld = e.target.checked; draw(); } }), ' 販売終了も表示'),
+      box);
+    draw();
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, merchView)); }
+}
+
+function newProductModal() {
+  const name = h('input', { type: 'text', placeholder: '例: ステッカー', autocomplete: 'off' });
+  const cat = h('input', { type: 'text', placeholder: '例: ステッカー', autocomplete: 'off' });
+  const color = h('input', { type: 'text', placeholder: '色(なければ空)', autocomplete: 'off' });
+  const size = h('input', { type: 'text', placeholder: 'サイズ(なければ空)', autocomplete: 'off' });
+  const price = intField(null, '売価'); const cost = intField(null, '原価(わかれば)');
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = '';
+    if (!name.value.trim()) { msg.textContent = '商品名を入れてください'; return; }
+    if (numOrNull(price) == null) { msg.textContent = '売価を入れてください'; return; }
+    ok.disabled = true;
+    try { await api.addProduct({ name: name.value.trim(), category: cat.value.trim(), color: color.value.trim(), size: size.value.trim(), price: numOrNull(price), cost: numOrNull(cost) }); m.close(); toast('商品を追加しました', 'ok'); merchView(); }
+    catch (e) { msg.textContent = /duplicate|unique/i.test(errMsg(e)) ? '同じ名前の商品がすでにあります' : errMsg(e); ok.disabled = false; }
+  } }, '追加する');
+  const m = modal([h('h3', {}, '新しい商品'), field('商品名', name), field('カテゴリ', cat), field('色', color), field('サイズ', size), field('売価(円)', price), field('原価(円)', cost, '空のままなら「未設定」になります'), msg, ok]);
+}
+
+async function productView(pid) {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('👕 商品', body, '#/merch'));
+  try {
+    const p = (await api.products()).find(x => x.id === pid);
+    if (my !== renderId) return;
+    if (!p) { body.replaceChildren(h('p', { class: 'empty' }, '商品が見つかりません。')); return; }
+    const reload = () => productView(pid);
+    const head = h('section', { class: 'card' },
+      h('div', { class: 'lmemo' }, p.name), h('div', { class: 'lsub' }, p.category || '(カテゴリなし)'),
+      h('div', { class: 'ltags' }, !p.is_active ? h('i', { class: 'tag dead' }, '販売終了') : null, p.co_share ? h('i', { class: 'tag mid' }, '共同 ' + Math.round(p.co_share * 100) + '%') : null),
+      h('button', { class: 'btn small', style: 'margin-top:10px', onclick: () => editProductModal(p, reload) }, '商品名・販売状態を変える'));
+    const vrows = p.variants.map(v => {
+      const profit = v.price != null && v.cost != null ? v.price - v.cost : null;
+      return h('div', { class: 'lrow' + (v.is_active ? '' : ' dead') },
+        h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, vLabel(v)),
+          h('div', { class: 'lsub' }, `売価 ${v.price == null ? '未設定' : yen(v.price)} ／ 原価 ${v.cost == null ? '未設定' : yen(v.cost)}` + (profit == null ? '' : ` ／ 粗利 ${yen(profit)}`)),
+          h('div', { class: 'ltags' }, !v.is_active ? h('i', { class: 'tag dead' }, '販売終了') : null)),
+        h('div', { class: 'lamt ' + (v.stock <= 0 ? 'neg' : '') }, v.stock + '点'),
+        h('button', { class: 'undo', onclick: () => stockModal(p, v, reload) }, '在庫'),
+        h('button', { class: 'undo', onclick: () => editVariantModal(p, v, reload) }, '編集'));
+    });
+    body.replaceChildren(head, h('div', { class: 'cap sec' }, 'バリエーション(色・サイズ)'), ...vrows,
+      h('button', { class: 'btn ghost', style: 'width:100%;margin-top:8px', onclick: () => addVariantModal(p, reload) }, '＋ 色・サイズを追加'),
+      h('p', { class: 'hint' }, '売価や原価を変えても、過去の売上の記録は変わりません(売った時点の値を記録します)。'));
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, () => productView(pid))); }
+}
+
+function editProductModal(p, done) {
+  const name = h('input', { type: 'text', value: p.name, autocomplete: 'off' });
+  const cat = h('input', { type: 'text', value: p.category || '', autocomplete: 'off' });
+  let active = p.is_active;
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = ''; if (!name.value.trim()) { msg.textContent = '商品名を入れてください'; return; }
+    ok.disabled = true;
+    try { await api.saveProduct(p.id, { name: name.value.trim(), category: cat.value.trim(), is_active: active }); m.close(); toast('保存しました', 'ok'); done(); }
+    catch (e) { msg.textContent = /duplicate|unique/i.test(errMsg(e)) ? '同じ名前の商品がすでにあります' : errMsg(e); ok.disabled = false; }
+  } }, '保存する');
+  const m = modal([h('h3', {}, '商品を編集'), field('商品名', name), field('カテゴリ', cat),
+    field('販売状態', chips([{ id: 'on', label: '販売中' }, { id: 'off', label: '販売終了' }], active ? 'on' : 'off', id => { active = id === 'on'; }), '販売終了にしても、過去の売上・在庫の記録は残ります。'), msg, ok]);
+}
+
+function editVariantModal(p, v, done) {
+  const price = intField(v.price, '売価'); const cost = intField(v.cost, '原価');
+  let active = v.is_active;
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = ''; if (numOrNull(price) == null) { msg.textContent = '売価を入れてください'; return; }
+    ok.disabled = true;
+    try { await api.saveVariant(v.id, { price: numOrNull(price), cost: numOrNull(cost), is_active: active }); m.close(); toast('保存しました', 'ok'); done(); }
+    catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '保存する');
+  const m = modal([h('h3', {}, p.name + '  ' + vLabel(v)), field('売価(円)', price), field('原価(円)', cost, '空にすると「未設定」になります'),
+    field('販売状態', chips([{ id: 'on', label: '販売中' }, { id: 'off', label: '販売終了' }], active ? 'on' : 'off', id => { active = id === 'on'; })), msg, ok]);
+}
+
+function addVariantModal(p, done) {
+  const color = h('input', { type: 'text', placeholder: '色(なければ空)', autocomplete: 'off' });
+  const size = h('input', { type: 'text', placeholder: 'サイズ(なければ空)', autocomplete: 'off' });
+  const base = p.variants[0] || {};
+  const price = intField(base.price, '売価'); const cost = intField(base.cost, '原価');
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = ''; if (numOrNull(price) == null) { msg.textContent = '売価を入れてください'; return; }
+    ok.disabled = true;
+    try { await api.addVariant(p.id, { color: color.value.trim(), size: size.value.trim(), price: numOrNull(price), cost: numOrNull(cost) }); m.close(); toast('追加しました', 'ok'); done(); }
+    catch (e) { msg.textContent = /duplicate|unique/i.test(errMsg(e)) ? '同じ色・サイズがすでにあります' : errMsg(e); ok.disabled = false; }
+  } }, '追加する');
+  const m = modal([h('h3', {}, p.name + ' に追加'), field('色', color), field('サイズ', size), field('売価(円)', price), field('原価(円)', cost), msg, ok]);
+}
+
+const STOCK_MODES = { receive: '入荷(増やす)', count: '棚卸し(実数)', less: '減らす' };
+async function stockModal(p, v, done) {
+  let mode = 'receive';
+  const n = intField(null, '0'); const memo = h('input', { type: 'text', placeholder: '例: 追加納品 / 数え直し', autocomplete: 'off' });
+  const date = h('input', { type: 'date', value: ymd() });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const eff = h('p', { class: 'effect' }, '');
+  const calc = () => {
+    const x = numOrNull(n); if (x == null) return null;
+    return mode === 'receive' ? x : mode === 'less' ? -x : x - v.stock;
+  };
+  const upd = () => { const d = calc(); eff.textContent = `いまの在庫 ${v.stock}点` + (d == null ? '' : ` → ${v.stock + d}点(${d >= 0 ? '+' : ''}${d})`); };
+  n.addEventListener('input', upd);
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = ''; const d = calc();
+    if (d == null) { msg.textContent = '数を入れてください'; return; }
+    if (d === 0) { msg.textContent = '変わる数がありません'; return; }
+    if (v.stock + d < 0) { msg.textContent = '在庫がマイナスになります。数を確認してください'; return; }
+    if (!state.by) { await pickBy(true); if (!state.by) return; }
+    ok.disabled = true;
+    try { await api.stockMove({ variant_id: v.id, qty: d, reason: mode === 'receive' ? 'receive' : 'adjust', date: date.value, memo: memo.value.trim() || (mode === 'count' ? '棚卸し' : ''), by: state.by }); m.close(); toast('在庫を更新しました', 'ok'); done(); }
+    catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '記録する');
+  const hist = h('div', { class: 'hint' }, '');
+  api.stockHistory(v.id).then(rows => { if (rows.length) hist.textContent = '最近: ' + rows.slice(0, 4).map(r => `${r.occurred_on.slice(5).replace('-', '/')} ${r.qty > 0 ? '+' : ''}${r.qty}`).join(' / '); }).catch(() => {});
+  const m = modal([h('h3', {}, p.name + '  ' + vLabel(v)),
+    chips(Object.entries(STOCK_MODES).map(([id, label]) => ({ id, label })), mode, id => { mode = id; upd(); }),
+    eff, field(mode === 'count' ? '数えた数' : '数', n), field('メモ', memo), field('日付', date), hist, msg, ok]);
+  upd();
+}
+
 // ---------- ルーター ----------
 function parseHash() {
   const raw = location.hash.replace(/^#/, '') || '/home';
@@ -316,6 +479,8 @@ async function route() {
   if (path === '/out') return moneyView(false);
   if (path === '/loan') return loanView(q.get('mode') || 'loan');
   if (path === '/history') return historyView();
+  if (path === '/merch') return merchView();
+  if (path === '/product') return productView(q.get('id'));
   return homeView();
 }
 async function boot() {
