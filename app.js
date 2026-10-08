@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd } from './api.js?v=7';
+import { api, DEMO, ApiError, ymd } from './api.js?v=8';
 
 const $app = document.getElementById('app');
 const yen = n => (n < 0 ? '−' : '') + '¥' + Math.abs(Math.round(n)).toLocaleString('ja-JP');
@@ -121,7 +121,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-7'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-8'),
   ]);
 }
 
@@ -166,7 +166,7 @@ async function homeView() {
         btn('in', '💰', 'お金が入った', '#/in'), btn('out', '💸', 'お金を使った', '#/out'),
         btn('loan', '👤', 'メンバーがWiθのお金を借りた', '#/loan?mode=loan'), btn('repay', '💵', 'メンバーが返済した', '#/loan?mode=repay'),
         btn('reim', '🔁', '立替を返す・相殺', '#/loan?mode=reimburse'), btn('hist', '📜', '履歴・取消', '#/history'),
-        btn('live', '🎸', 'ライブを登録', null, 'Phase 4で追加'), btn('merch', '👕', '商品・在庫', '#/merch')),
+        btn('live', '🎸', 'ライブ', '#/live-list'), btn('merch', '👕', '商品・在庫', '#/merch')),
       d.balances.some(b => b.owes_withi || b.withi_owes) ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '👥 メンバーごと'),
         d.balances.filter(b => b.owes_withi || b.withi_owes).map(b => h('div', { class: 'brow' }, h('span', {}, b.name),
           h('span', {}, b.owes_withi ? h('i', { class: 'tag recv' }, '借入 ' + yen(b.owes_withi)) : null, b.withi_owes ? h('i', { class: 'tag pay' }, '未払い ' + yen(b.withi_owes)) : null)))) : null);
@@ -570,6 +570,143 @@ async function saleView(channel) {
   redraw();
 }
 
+// ---------- ライブ ----------
+const rating = p => { const t = state.rating || { great: 20000, good: 5000, draw: 0 }; return p >= t.great ? ['🔥', '大成功'] : p >= t.good ? ['😄', 'いい感じ'] : p >= t.draw ? ['😐', 'トントン'] : ['💧', '赤字']; };
+const liveKind = k => (k === 'host' ? '主催' : '出演');
+const dshow = d => String(d).slice(0, 10).replaceAll('-', '/');
+
+async function liveListView() {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('🎸 ライブ', body));
+  try {
+    const list = await api.lives();
+    if (my !== renderId) return;
+    const conf = list.filter(l => l.status === 'confirmed');
+    const tot = conf.reduce((s, l) => s + l.profit, 0);
+    const rows = list.map(l => {
+      const [ico] = rating(l.profit);
+      return h('a', { class: 'lrow', href: '#/live?id=' + l.id },
+        h('span', { class: 'lico' }, l.status === 'confirmed' ? ico : '📝'),
+        h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, l.event_name),
+          h('div', { class: 'lsub' }, [dshow(l.live_date), l.venue_name, l.prefecture].filter(Boolean).join(' · ')),
+          h('div', { class: 'ltags' }, h('i', { class: 'tag ' + (l.kind === 'host' ? 'pay' : 'recv') }, liveKind(l.kind)), l.status === 'confirmed' ? h('i', { class: 'tag ok' }, '確定') : h('i', { class: 'tag mid' }, '下書き'))),
+        h('div', { class: 'lamt ' + (l.profit < 0 ? 'neg' : l.profit > 0 ? 'pos' : '') }, yen(l.profit)));
+    });
+    body.replaceChildren(
+      h('section', { class: 'card mini' }, h('div', { class: 'cap' }, '🎸 確定したライブ ' + conf.length + '本 の利益'), h('b', { class: tot < 0 ? 'neg' : 'pos' }, yen(tot))),
+      h('button', { class: 'btn big in', style: 'width:100%', onclick: () => liveModal(null, id => { location.hash = '#/live?id=' + id; }) }, '＋ ライブを登録'),
+      h('div', { class: 'cap sec' }, 'ライブ一覧'),
+      ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだライブがありません。上のボタンから登録してください。')]),
+      h('p', { class: 'hint' }, '過去の記録(取り込み済みのデータ)は、ライブとは結びついていません。これから登録するライブの収支がここに集まります。'));
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, liveListView)); }
+}
+
+async function liveModal(live, done) {
+  const f = { kind: live ? live.kind : 'attend' };
+  const name = h('input', { type: 'text', placeholder: '例: ○○ presents △△', autocomplete: 'off', value: live ? live.event_name : '' });
+  const date = h('input', { type: 'date', value: live ? String(live.live_date).slice(0, 10) : ymd() });
+  const venue = h('input', { type: 'text', placeholder: '例: CAPARVO HALL', autocomplete: 'off', list: 'venue-list', value: live ? live.venue_name : '' });
+  const dl = h('datalist', { id: 'venue-list' });
+  const pref = h('input', { type: 'text', placeholder: '例: 鹿児島', autocomplete: 'off', value: live && live.prefecture || '' });
+  const memo = h('input', { type: 'text', placeholder: 'メモ(任意)', autocomplete: 'off', value: live && live.memo || '' });
+  api.venues().then(vs => { dl.replaceChildren(...vs.map(v => h('option', { value: v.name }))); venue.addEventListener('change', () => { const x = vs.find(v => v.name === venue.value.trim()); if (x && x.prefecture && !pref.value) pref.value = x.prefecture; }); }).catch(() => {});
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = '';
+    if (!name.value.trim()) { msg.textContent = 'ライブの名前を入れてください'; return; }
+    if (!date.value) { msg.textContent = '日付を入れてください'; return; }
+    if (!state.by) { await pickBy(true); if (!state.by) return; }
+    ok.disabled = true;
+    const o = { name: name.value.trim(), date: date.value, kind: f.kind, venue: venue.value.trim(), prefecture: pref.value.trim(), memo: memo.value.trim(), by: state.by };
+    try { let id = live && live.id; if (live) await api.saveLive(id, o); else id = await api.addLive(o); m.close(); toast(live ? '更新しました' : 'ライブを登録しました', 'ok'); done(id); }
+    catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, live ? '保存する' : '登録する');
+  const m = modal([h('h3', {}, live ? 'ライブを編集' : 'ライブを登録'),
+    field('出演？主催？', chips([{ id: 'attend', label: '出演(呼ばれた)' }, { id: 'host', label: '主催(自分たちで開催)' }], f.kind, id => { f.kind = id; })),
+    field('ライブ名', name), field('日付', date), field('会場', venue), dl, field('都道府県', pref), field('メモ', memo), msg, ok]);
+}
+
+function liveEntryModal(live, isIn, done) {
+  const cats = state.cats.filter(c => c.group_name === live.kind && c.flow === (isIn ? 'income' : 'expense'));
+  const f = { cat: '', payer: '' };
+  const amt = amountField(); const memo = h('input', { type: 'text', placeholder: isIn ? '例: ギャラ' : '例: 駐車場代', autocomplete: 'off' });
+  const date = h('input', { type: 'date', value: String(live.live_date).slice(0, 10) });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const payers = [{ id: '', label: 'Wiθ資金' }, ...state.people.filter(p => p.can_pay).map(p => ({ id: p.id, label: p.name }))];
+  const hint = h('span', { class: 'hint' }, 'Wiθの資金から支払います。資金が減ります。');
+  const ok = h('button', { class: 'btn big ' + (isIn ? 'in' : 'out'), onclick: async () => {
+    msg.textContent = ''; const a = amt.get();
+    if (!f.cat) { msg.textContent = 'カテゴリを選んでください'; return; }
+    if (!(a > 0)) { msg.textContent = '金額を入れてください'; return; }
+    if (!state.by) { await pickBy(true); if (!state.by) return; }
+    ok.disabled = true;
+    try {
+      await api.addEntry({ date: date.value, kind: isIn ? 'income' : (f.payer ? 'expense_advanced' : 'expense_fund'), amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), live_id: live.id, by: state.by });
+      m.close(); getFx(isIn ? `+${yen(a)}` : `−${yen(a)}`, isIn ? 'MONEY GET!' : (f.payer ? '立替を記録' : 'PAID')); done();
+    } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '記録する');
+  const m = modal([h('h3', {}, (isIn ? '💰 収入 ' : '💸 支出 ') + '— ' + live.event_name),
+    field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), '', id => { f.cat = id; })),
+    field('金額', amt.el), field('内容', memo), field('日付', date),
+    isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), chips(payers, '', id => { f.payer = id; hint.textContent = id ? `立替: 資金は減らず、${nameOf(id)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。'; }), hint),
+    msg, ok]);
+}
+
+async function liveView(id) {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('🎸 ライブ', body, '#/live-list'));
+  try {
+    const [lives, entries] = await Promise.all([api.lives(), api.liveEntries(id)]);
+    if (my !== renderId) return;
+    const l = lives.find(x => x.id === id);
+    if (!l) { body.replaceChildren(h('p', { class: 'empty' }, 'ライブが見つかりません。')); return; }
+    const reload = () => liveView(id);
+    const conf = l.status === 'confirmed';
+    const [ico, lab] = rating(l.profit);
+    const rows = entries.map(r => {
+      const isRev = !!r.reverses_id; const inc = r.kind === 'income';
+      const sg = isRev ? (inc ? -1 : 1) : (inc ? 1 : -1);
+      const canRev = !isRev && !r.reversed && !conf;
+      return h('div', { class: 'lrow' + (r.reversed || isRev ? ' dead' : '') },
+        h('span', { class: 'lico' }, inc ? '💰' : '💸'),
+        h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, r.memo || r.category_name || ''),
+          h('div', { class: 'lsub' }, [r.category_name, r.kind === 'expense_advanced' && r.payer_name ? r.payer_name + 'が立替' : ''].filter(Boolean).join(' · ') || ' '),
+          h('div', { class: 'ltags' }, r.reversed ? h('i', { class: 'tag dead' }, '取消済み') : null, isRev ? h('i', { class: 'tag dead' }, '取消の行') : null)),
+        h('div', { class: 'lamt ' + (sg > 0 ? 'pos' : 'neg') }, (sg > 0 ? '+' : '−') + yen(r.amount).replace('−', '')),
+        canRev ? h('button', { class: 'undo', onclick: async () => {
+          const ok = await confirmBox('この記録を取り消す？', `${r.memo || r.category_name}  ${yen(r.amount)}\n元の行は消さず、打ち消しの行が追加されます。`, '取り消す');
+          if (!ok) return;
+          try { await api.reverse(r.id, state.by); toast('取り消しました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
+        } }, '取消') : null);
+    });
+    const head = h('section', { class: 'card' },
+      h('div', { class: 'lmemo' }, l.event_name),
+      h('div', { class: 'lsub' }, [dshow(l.live_date), l.venue_name, l.prefecture].filter(Boolean).join(' · ')),
+      h('div', { class: 'ltags' }, h('i', { class: 'tag ' + (l.kind === 'host' ? 'pay' : 'recv') }, liveKind(l.kind)), conf ? h('i', { class: 'tag ok' }, '確定') : h('i', { class: 'tag mid' }, '下書き')),
+      h('div', { class: 'cap', style: 'margin-top:12px' }, '🎯 LIVE PROFIT'),
+      h('div', { class: 'big' + (l.profit < 0 ? ' neg' : '') }, yen(l.profit)),
+      h('div', { class: 'trio' }, h('div', {}, h('small', {}, '収入'), h('b', { class: 'pos' }, yen(l.income))), h('div', {}, h('small', {}, '支出'), h('b', { class: 'neg' }, yen(l.expense))), h('div', {}, h('small', {}, '評価'), h('b', {}, ico + ' ' + lab))),
+      l.memo ? h('p', { class: 'hint' }, l.memo) : null,
+      conf ? null : h('button', { class: 'btn small', style: 'margin-top:10px', onclick: () => liveModal(l, reload) }, 'ライブの情報を編集'));
+    const unsettled = entries.some(r => r.kind === 'expense_advanced' && !r.reversed && !r.reverses_id);
+    body.replaceChildren(head,
+      conf ? h('p', { class: 'hint' }, '確定済みです。記録を足したり取り消したりするには、先に「確定を解除」してください。') : h('div', { class: 'duo' },
+        h('button', { class: 'btn in', onclick: () => liveEntryModal(l, true, reload) }, '💰 収入を追加'),
+        h('button', { class: 'btn out', onclick: () => liveEntryModal(l, false, reload) }, '💸 支出を追加')),
+      h('div', { class: 'cap sec' }, 'このライブのお金'),
+      ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだ記録がありません。')]),
+      unsettled ? h('p', { class: 'hint' }, '立替の返済は、ホームの「立替を返す・相殺」から行います。') : null,
+      h('button', { class: 'btn ' + (conf ? 'ghost' : 'big'), style: 'width:100%;margin-top:14px', onclick: async () => {
+        if (!state.by) { await pickBy(true); if (!state.by) return; }
+        const okk = await confirmBox(conf ? '確定を解除する？' : 'このライブを確定する？', conf ? '記録を足したり取り消したりできるようになります。' : `LIVE PROFIT ${yen(l.profit)} で確定します。確定中は記録の追加・取消ができません(いつでも解除できます)。`, conf ? '解除する' : '確定する');
+        if (!okk) return;
+        try { await api.setLiveStatus(id, { confirm: !conf, by: state.by, score: { profit: l.profit, income: l.income, expense: l.expense, rating: lab } }); toast(conf ? '確定を解除しました' : '確定しました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
+      } }, conf ? '確定を解除' : '✅ このライブを確定する'));
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, () => liveView(id))); }
+}
+
 // ---------- ルーター ----------
 function parseHash() {
   const raw = location.hash.replace(/^#/, '') || '/home';
@@ -588,12 +725,15 @@ async function route() {
   if (path === '/out') return moneyView(false);
   if (path === '/loan') return loanView(q.get('mode') || 'loan');
   if (path === '/history') return historyView();
+  if (path === '/live-list') return liveListView();
+  if (path === '/live') return liveView(q.get('id'));
   if (path === '/merch') return merchView();
   if (path === '/product') return productView(q.get('id'));
   return homeView();
 }
 async function boot() {
   [state.people, state.cats] = await Promise.all([api.people(), api.categories()]);
+  try { state.rating = await api.liveRating(); } catch { /* 既定値を使う */ }
 }
 window.addEventListener('hashchange', route);
 route(); // module script は DOM 構築後に実行される

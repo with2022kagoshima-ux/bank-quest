@@ -151,7 +151,7 @@ const real = {
       body: {
         occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id || null,
         memo: e.memo || null, payer_id: e.payer_id || null, party_id: e.party_id || null,
-        source: 'manual', posting: 'posted', created_by: e.by,
+        source: e.live_id ? 'live' : 'manual', live_id: e.live_id || null, posting: 'posted', created_by: e.by,
       },
     });
   },
@@ -160,6 +160,46 @@ const real = {
   reverse: (id, by) => rest('rpc/app_reverse', { method: 'POST', body: { p_id: id, p_by: by } }),
   // 物販の売上(BASE・個別販売)を、注文・在庫・台帳へ一度に記録する
   merchSale: o => rest('rpc/app_merch_sale', { method: 'POST', body: { p_channel: o.channel, p_date: o.date, p_lines: o.lines, p_received: o.received, p_memo: o.memo || null, p_customer: o.customer || null, p_by: o.by } }),
+  // ---- ライブ ----
+  async lives() {
+    const [rows, vs, ls] = await Promise.all([
+      rest('v_live_profit?select=*&order=live_date.desc'),
+      rest('venues?select=id,name,prefecture&order=name'),
+      rest('lives?select=id,memo,score'),
+    ]);
+    const vm = new Map(vs.map(v => [v.id, v])); const lm = new Map(ls.map(l => [l.id, l]));
+    return rows.map(r => ({ ...r, id: r.live_id, income: Number(r.income), expense: Number(r.expense), profit: Number(r.profit),
+      venue_name: r.venue_id && vm.get(r.venue_id) ? vm.get(r.venue_id).name : '', memo: (lm.get(r.live_id) || {}).memo || '', score: (lm.get(r.live_id) || {}).score || null }));
+  },
+  liveRating: async () => { const r = await rest('settings?select=value&key=eq.live_rating'); return r[0] ? r[0].value : null; },
+  venues: () => rest('venues?select=id,name,prefecture&order=name'),
+  async _venueId(name, pref) {
+    name = (name || '').trim(); if (!name) return null;
+    const ex = await rest(`venues?select=id&name=eq.${encodeURIComponent(name)}`);
+    if (ex.length) return ex[0].id;
+    const r = await rest('venues', { method: 'POST', prefer: 'return=representation', body: { name, prefecture: pref || null } });
+    return r[0].id;
+  },
+  async addLive(f) {
+    const venue_id = await real._venueId(f.venue, f.prefecture);
+    const r = await rest('lives', { method: 'POST', prefer: 'return=representation', body: { live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue_id, memo: f.memo || null, created_by: f.by } });
+    return r[0].id;
+  },
+  async saveLive(id, f) {
+    const venue_id = await real._venueId(f.venue, f.prefecture);
+    await rest(`lives?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: { live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue_id, memo: f.memo || null } });
+  },
+  setLiveStatus: (id, st) => rest(`lives?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal',
+    body: st.confirm ? { status: 'confirmed', confirmed_at: new Date().toISOString(), confirmed_by: st.by, score: st.score } : { status: 'draft', confirmed_at: null, confirmed_by: null, score: null } }),
+  async liveEntries(id) {
+    const sel = 'select=*,category:categories(name),payer:people!ledger_entries_payer_id_fkey(name)';
+    const [rows, rev] = await Promise.all([
+      rest(`ledger_entries?${sel}&live_id=eq.${id}&order=occurred_on.asc,created_at.asc`),
+      rest('ledger_entries?select=reverses_id&reverses_id=not.is.null'),
+    ]);
+    const reversed = new Set(rev.map(x => x.reverses_id));
+    return rows.map(r => ({ ...r, amount: Number(r.amount), category_name: r.category && r.category.name, payer_name: r.payer && r.payer.name, reversed: reversed.has(r.id) }));
+  },
   // ---- 商品・在庫 ----
   async products() {
     const [vs, st] = await Promise.all([
@@ -196,6 +236,7 @@ function makeDemo() {
     ...mk('general', 'income', ['BASE', '物販(個別販売)', 'サブスク収入', 'SNS収入', 'その他']),
     ...mk('general', 'expense', ['REC・音源制作', '宣伝・デザイン', '駐車場代', 'スタジオ代', '活動機材費', 'サブスク系', 'グッズ・物販制作費', '手数料', '発送・送料', 'STS取り分', 'その他']),
   ];
+  CATS.push(...mk('attend', 'income', ['ギャラ(チャージバック含む)', '物販売上', 'その他']), ...mk('attend', 'expense', ['交通費', 'ノルマ', '打ち上げ代', 'その他']), ...mk('host', 'income', ['チケット売上', '物販売上', 'その他']), ...mk('host', 'expense', ['箱代', 'ドリンク代', 'その他']));
   let n = 0; const id = () => `e${++n}`;
   const E = []; const A = []; // entries, allocations
   const now = () => new Date().toISOString();
@@ -221,7 +262,7 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]]);
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5 });
-  const MV = []; const ORD = new Map();
+  const MV = []; const ORD = new Map(); const LV = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -247,10 +288,25 @@ function makeDemo() {
         reversed: E.some(x => x.reverses_id === e.id), adv: av.get(e.id) || null,
       }));
     },
-    async addEntry(e) { await wait(); add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id }); },
+    async addEntry(e) { await wait(); add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id, live_id: e.live_id || null, source: e.live_id ? 'live' : 'manual' }); },
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
     async offset(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable || e.amount > b.recv) throw new ApiError(`相殺できるのは、未払い残(${b.payable}円)と借入残(${b.recv}円)の小さい方までです`); const r = add({ occurred_on: e.date, kind: 'offset', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
 
+    async lives() {
+      await wait();
+      return LV.map(l => { const es = E.filter(e => e.live_id === l.id); const pn = es.map(e => sign(e) * ((eff(e).pnl) || 0));
+        return { ...l, live_id: l.id, venue_name: l.venue, income: pn.filter(x => x > 0).reduce((s, x) => s + x, 0), expense: -pn.filter(x => x < 0).reduce((s, x) => s + x, 0), profit: pn.reduce((s, x) => s + x, 0) }; })
+        .sort((x, y) => y.live_date.localeCompare(x.live_date));
+    },
+    async liveRating() { return null; },
+    async venues() { await wait(); return [...new Set(LV.map(l => l.venue).filter(Boolean))].map(n => ({ id: n, name: n, prefecture: '鹿児島' })); },
+    async addLive(f) { await wait(); const id = 'L' + (++n); LV.push({ id, live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue: f.venue || '', memo: f.memo || '', status: 'draft', score: null }); return id; },
+    async saveLive(id, f) { await wait(); Object.assign(LV.find(l => l.id === id), { live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue: f.venue || '', memo: f.memo || '' }); },
+    async setLiveStatus(id, st) { await wait(); Object.assign(LV.find(l => l.id === id), st.confirm ? { status: 'confirmed', score: st.score } : { status: 'draft', score: null }); },
+    async liveEntries(id) {
+      await wait(); const nm = pid => (P.find(p => p.id === pid) || {}).name;
+      return E.filter(e => e.live_id === id).map(e => ({ ...e, category_name: (CATS.find(c => c.id === e.category_id) || {}).name, payer_name: nm(e.payer_id), reversed: E.some(x => x.reverses_id === e.id) }));
+    },
     async products() { await wait(); return groupProducts(allV().map(v => ({ ...v, stock: v.stock }))); },
     async saveVariant(id, f) { await wait(); const v = allV().find(x => x.id === id); const o = PR.flatMap(x => x.vars).find(x => x.id === id); Object.assign(o, { price: f.price, cost: f.cost, is_active: f.is_active }); return v; },
     async saveProduct(id, f) { await wait(); const x = PR.find(y => y.p.id === id); Object.assign(x.p, { name: f.name, category: f.category, is_active: f.is_active }); },
