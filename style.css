@@ -67,10 +67,10 @@ button{font:inherit;color:inherit}
 input[type=text],input[type=email],input[type=password],input[type=date]{width:100%;font:inherit;color:var(--text);background:var(--bg2);border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;min-height:48px;outline:none}
 input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px #27e1ff22}
 input[type=date]{color-scheme:dark}
-.amount-wrap{display:flex;align-items:center;gap:6px;background:var(--bg2);border:1.5px solid var(--line);border-radius:14px;padding:4px 14px;flex:1}
+.amount-wrap{min-width:0;display:flex;align-items:center;gap:6px;background:var(--bg2);border:1.5px solid var(--line);border-radius:14px;padding:4px 14px;flex:1}
 .amount-wrap:focus-within{border-color:var(--yellow);box-shadow:0 0 0 3px #ffd23f22}
 .yen{font-size:26px;font-weight:900;color:var(--yellow)}
-.amount{flex:1;min-width:0;background:transparent;border:0;outline:none;color:var(--yellow);font:inherit;font-size:34px;font-weight:900;padding:6px 0;font-variant-numeric:tabular-nums}
+.amount{flex:1;min-width:0;width:100%;background:transparent;border:0;outline:none;color:var(--yellow);font:inherit;font-size:34px;font-weight:900;padding:6px 0;font-variant-numeric:tabular-nums}
 .with-btn{display:flex;gap:8px;align-items:stretch}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{display:flex;flex-direction:column;align-items:flex-start;background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:9px 14px;min-height:44px;font-weight:700;cursor:pointer}
@@ -151,3 +151,5 @@ input[type=date]{color-scheme:dark}
 .brow.due{flex-wrap:wrap;gap:8px}.brow.due>span:first-child{flex:1 1 100%}.brow.due>span:last-child{display:flex;gap:8px;width:100%}.brow.due .undo{flex:1;min-height:44px}
 
 body:has(.modal-back){overflow:hidden}.modal{touch-action:pan-y}
+
+html,body{overflow-x:hidden;max-width:100%}.form>*{min-width:0;max-width:100%}.btn.ghost.small{white-space:nowrap}
