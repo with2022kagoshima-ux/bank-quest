@@ -212,6 +212,17 @@ const real = {
     }
     return out;
   },
+  // ---- 分析 ----
+  async analysis() {
+    const all = async q => { const out = []; let off = 0; for (;;) { const page = await rest(`${q}&limit=1000&offset=${off}`); out.push(...page); if (page.length < 1000) break; off += 1000; } return out; };
+    const [rows, moves, products] = await Promise.all([
+      all('ledger_effects?select=id,occurred_on,kind,category_id,live_id,pnl_delta&pnl_delta=neq.0&order=id'),
+      all('stock_movements?select=id,variant_id,qty,reason,occurred_on&reason=in.(sale_air,sale_base,sale_direct,reversal)&order=id'),
+      this.products(),
+    ]);
+    return { rows: rows.map(r => ({ date: r.occurred_on, kind: r.kind, category_id: r.category_id, live_id: r.live_id, pnl: Number(r.pnl_delta) })),
+      moves: moves.map(m => ({ variant_id: m.variant_id, qty: Number(m.qty), date: m.occurred_on })), products };
+  },
   // ---- ライブ ----
   editEntry: (id, o) => rest('rpc/app_entry_edit', { method: 'POST', body: { p_id: id, p_date: o.date, p_amount: o.amount, p_category: o.category_id || null, p_memo: o.memo || null, p_payer: o.payer_id || null, p_by: o.by } }),
   liveAirStatus: id => rest('rpc/live_air_status', { method: 'POST', body: { p_live: id } }),
@@ -352,6 +363,12 @@ function makeDemo() {
       return LV.map(l => { const es = E.filter(e => e.live_id === l.id); const pn = es.map(e => sign(e) * ((eff(e).pnl) || 0));
         return { ...l, live_id: l.id, venue_name: l.venue, income: es.filter(e => e.kind === 'income').reduce((s, e) => s + sign(e) * e.amount, 0), expense: es.filter(e => e.kind !== 'income').reduce((s, e) => s + sign(e) * e.amount, 0), profit: pn.reduce((s, x) => s + x, 0) }; })
         .sort((x, y) => y.live_date.localeCompare(x.live_date));
+    },
+    async analysis() {
+      await wait();
+      return { rows: E.filter(e => e.posting === 'posted' && (eff(e).pnl || 0) !== 0).map(e => ({ date: e.occurred_on, kind: e.kind, category_id: e.category_id, live_id: e.live_id || null, pnl: sign(e) * eff(e).pnl })),
+        moves: MV.filter(m => ['sale_air', 'sale_base', 'sale_direct', 'reversal'].includes(m.reason)).map(m => ({ variant_id: m.variant_id, qty: m.qty, date: m.occurred_on })),
+        products: groupProducts(allV().map(v => ({ ...v, stock: v.stock }))) };
     },
     async airMap() { await wait(); return AM; },
     async airBaskets() { await wait(); return AB.map(b => ({ ...b })); },

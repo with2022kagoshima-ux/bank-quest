@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=15';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=15';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=16';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=16';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -126,7 +126,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-15'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-16'),
   ]);
 }
 
@@ -183,7 +183,7 @@ async function homeView() {
         btn('in', '💰', 'お金が入った', '#/in'), btn('out', '💸', 'お金を使った', '#/out'),
         btn('loan', '👤', 'メンバーがWiθのお金を借りた', '#/loan?mode=loan'), btn('repay', '💵', 'メンバーが返済した', '#/loan?mode=repay'),
         btn('reim', '🔁', '立替を返す・相殺', '#/loan?mode=reimburse'), btn('hist', '📜', '履歴・取消', '#/history'),
-        btn('live', '🎸', 'ライブ', '#/live-list'), btn('merch', '👕', '商品・在庫', '#/merch'), btn('manage', '🛠️', '管理', '#/manage', '定期費用・テンプレ・バックアップ')),
+        btn('live', '🎸', 'ライブ', '#/live-list'), btn('merch', '👕', '商品・在庫', '#/merch'), btn('manage', '🛠️', '管理', '#/manage', '定期費用・テンプレ・バックアップ'), btn('analysis', '📊', '分析', '#/analysis', '月別・カテゴリ別・ライブ別・売れ筋')),
       d.balances.some(b => b.owes_withi || b.withi_owes) ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '👥 メンバーごと'),
         d.balances.filter(b => b.owes_withi || b.withi_owes).map(b => h('div', { class: 'brow' }, h('span', {}, b.name),
           h('span', {}, b.owes_withi ? h('i', { class: 'tag recv' }, '借入 ' + yen(b.owes_withi)) : null, b.withi_owes ? h('i', { class: 'tag pay' }, '未払い ' + yen(b.withi_owes)) : null)))) : null);
@@ -893,11 +893,99 @@ async function airPreview(file, box, existing, reload, opt = {}) {
 const lastBackup = () => { try { return localStorage.getItem('withi_last_backup') || ''; } catch { return ''; } };
 const daysSince = iso => (iso ? Math.floor((Date.now() - Date.parse(iso)) / 86400000) : null);
 
+// ---- 分析ダッシュボード ----
+async function analysisView() {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('📊 分析', body, '#/manage'));
+  let data, lives;
+  try { [data, lives] = await Promise.all([api.analysis(), api.lives()]); } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, analysisView)); return; }
+  if (my !== renderId) return;
+  const PERIODS = { m1: '今月', m3: '3か月', y1: '1年', all: '全期間' };
+  let per = 'm3'; try { per = localStorage.getItem('withi_an_per') || 'm3'; } catch { /* 無くても動く */ }
+  if (!PERIODS[per]) per = 'm3';
+  let flow = 'out';
+  const now = new Date(); const pad2 = n => String(n).padStart(2, '0');
+  const mk = (y, m) => `${y}-${pad2(m)}`;
+  const startOf = p => { if (p === 'all') return '0000-00'; const back = { m1: 0, m3: 2, y1: 11 }[p]; const d = new Date(now.getFullYear(), now.getMonth() - back, 1); return mk(d.getFullYear(), d.getMonth() + 1); };
+  const catName = id => (state.cats.find(c => c.id === id) || {}).name || '(カテゴリなし)';
+  const IN = r => r.kind === 'income';
+  const vmap = new Map(); for (const p of data.products) for (const v of p.variants) vmap.set(v.id, { p, v });
+  const bar = (w, color) => h('div', { style: `height:10px;border-radius:6px;background:${color};width:${Math.max(2, Math.min(100, w))}%` });
+
+  const draw = () => {
+    const from = startOf(per);
+    const rows = data.rows.filter(r => r.date.slice(0, 7) >= from);
+    const inc = rows.filter(IN).reduce((a, r) => a + r.pnl, 0);
+    const exp = -rows.filter(r => !IN(r)).reduce((a, r) => a + r.pnl, 0);
+    const profit = inc - exp;
+
+    // 月別
+    const months = []; for (let i = 11; i >= 0; i--) { const d = new Date(now.getFullYear(), now.getMonth() - i, 1); months.push(mk(d.getFullYear(), d.getMonth() + 1)); }
+    const mt = months.map(m => { const rs = data.rows.filter(r => r.date.slice(0, 7) === m); return { m, inc: rs.filter(IN).reduce((a, r) => a + r.pnl, 0), exp: -rs.filter(r => !IN(r)).reduce((a, r) => a + r.pnl, 0) }; });
+    const mx = Math.max(1, ...mt.map(x => Math.max(x.inc, x.exp)));
+    const monthly = h('div', { class: 'card' }, h('div', { class: 'cap' }, '月ごとの収入と支出（直近12か月）'),
+      h('div', { style: 'display:flex;align-items:flex-end;gap:4px;height:120px;margin-top:10px' }, ...mt.map(x => h('div', { style: 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0', title: `${x.m} 収入${yen(x.inc)} 支出${yen(x.exp)}` },
+        h('div', { style: 'display:flex;align-items:flex-end;gap:2px;height:100%;width:100%;justify-content:center' },
+          h('div', { style: `width:42%;background:var(--green);border-radius:3px 3px 0 0;height:${(x.inc / mx) * 100}%;min-height:${x.inc ? 2 : 0}px` }),
+          h('div', { style: `width:42%;background:var(--pink);border-radius:3px 3px 0 0;height:${(x.exp / mx) * 100}%;min-height:${x.exp ? 2 : 0}px` }))))),
+      h('div', { style: 'display:flex;gap:4px;margin-top:4px' }, ...mt.map(x => h('div', { style: 'flex:1;text-align:center;font-size:10px;color:var(--muted)' }, String(+x.m.slice(5))))),
+      h('div', { class: 'hint', style: 'margin-top:8px' }, h('span', { style: 'color:var(--green)' }, '■'), ' 収入　', h('span', { style: 'color:var(--pink)' }, '■'), ' 支出　（数字は月）'));
+
+    // カテゴリ別
+    const sel = rows.filter(r => (flow === 'in') === IN(r));
+    const byCat = new Map(); for (const r of sel) byCat.set(r.category_id, (byCat.get(r.category_id) || 0) + (IN(r) ? r.pnl : -r.pnl));
+    const cats = [...byCat.entries()].map(([id, v]) => [catName(id), Math.abs(v) < 1 ? 0 : v]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+    const tot = cats.reduce((a, x) => a + x[1], 0) || 1;
+    const catCard = h('div', { class: 'card' }, h('div', { class: 'cap' }, 'カテゴリ別'),
+      h('div', { class: 'tabs', style: 'margin:10px 0' }, h('a', { class: 'tab' + (flow === 'out' ? ' on' : ''), href: 'javascript:void(0)', onclick: () => { flow = 'out'; draw(); } }, '支出'), h('a', { class: 'tab' + (flow === 'in' ? ' on' : ''), href: 'javascript:void(0)', onclick: () => { flow = 'in'; draw(); } }, '収入')),
+      ...(cats.length ? cats.slice(0, 10).map(([n, v]) => h('div', { style: 'margin:8px 0' },
+        h('div', { style: 'display:flex;justify-content:space-between;font-size:14px' }, h('span', {}, n), h('span', {}, yen(v), ' ', h('span', { class: 'muted' }, Math.round(v / tot * 100) + '%'))),
+        bar(v / cats[0][1] * 100, flow === 'in' ? 'var(--green)' : 'var(--pink)'))) : [h('p', { class: 'empty' }, 'この期間のデータはありません')]));
+
+    // ライブ別
+    const lv = lives.filter(l => String(l.live_date).slice(0, 7) >= from && (l.income || l.expense)).sort((a, b) => b.profit - a.profit);
+    const avg = lv.length ? Math.round(lv.reduce((a, l) => a + l.profit, 0) / lv.length) : 0;
+    const liveRow = l => h('a', { class: 'lrow', href: '#/live?id=' + l.id }, h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, l.event_name || '(名前なし)'), h('div', { class: 'lsub' }, String(l.live_date).slice(5).replace('-', '/') + (l.venue_name ? '　' + l.venue_name : ''))),
+      h('span', { class: 'lamt', style: `color:${l.profit >= 0 ? 'var(--green)' : 'var(--red)'}` }, yen(l.profit)));
+    const liveCard = h('div', { class: 'card' }, h('div', { class: 'cap' }, 'ライブ別の利益'),
+      lv.length ? h('div', {}, h('div', { class: 'hint', style: 'margin:6px 0 10px' }, `${lv.length}本　1本あたり平均 ${yen(avg)}`),
+        h('div', { class: 'cap', style: 'margin:6px 0' }, 'ベスト'), ...lv.slice(0, 3).map(liveRow),
+        lv.length > 3 ? h('div', {}, h('div', { class: 'cap', style: 'margin:10px 0 6px' }, 'ワースト'), ...lv.slice(-Math.min(3, lv.length - 3)).reverse().map(liveRow)) : null)
+        : h('p', { class: 'empty' }, 'この期間のライブはありません'));
+
+    // 物販
+    const sold = new Map(); for (const m of data.moves) { if (m.date.slice(0, 7) < from) continue; sold.set(m.variant_id, (sold.get(m.variant_id) || 0) - m.qty); }
+    const byProd = new Map(); for (const [vid, q] of sold) { const x = vmap.get(vid); if (!x || q === 0) continue; const o = byProd.get(x.p.id) || { name: x.p.name, qty: 0, sales: 0, gp: 0 }; o.qty += q; o.sales += q * x.v.price; o.gp += q * (x.v.price - (x.v.cost || 0)); byProd.set(x.p.id, o); }
+    const prods = [...byProd.values()].filter(p => p.qty > 0).sort((a, b) => b.qty - a.qty);
+    const maxq = prods[0] ? prods[0].qty : 1;
+    const merchCard = h('div', { class: 'card' }, h('div', { class: 'cap' }, '物販の売れ筋'),
+      prods.length ? h('div', {}, h('div', { class: 'hint', style: 'margin:6px 0 4px' }, `合計 ${prods.reduce((a, p) => a + p.qty, 0)}点　定価ベースの概算売上 ${yen(prods.reduce((a, p) => a + p.sales, 0))}`),
+        ...prods.slice(0, 8).map(p => h('div', { style: 'margin:8px 0' },
+          h('div', { style: 'display:flex;justify-content:space-between;font-size:14px;gap:8px' }, h('span', { style: 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, p.name), h('span', { style: 'white-space:nowrap' }, p.qty + '点 ', h('span', { class: 'muted' }, yen(p.gp)))),
+          bar(p.qty / maxq * 100, 'var(--cyan)'))),
+        h('div', { class: 'hint' }, '右の金額は「定価−原価」の概算粗利。割引・無料は反映していません。'))
+        : h('p', { class: 'empty' }, 'この期間の販売記録はありません（在庫の基準日より前の売上は含みません）'));
+
+    body.replaceChildren(
+      h('div', { class: 'tabs' }, ...Object.entries(PERIODS).map(([k, v]) => h('a', { class: 'tab' + (k === per ? ' on' : ''), href: 'javascript:void(0)', onclick: () => { per = k; try { localStorage.setItem('withi_an_per', k); } catch { /* 無くても動く */ } draw(); } }, v))),
+      h('div', { class: 'card' }, h('div', { class: 'cap' }, PERIODS[per] + 'の収支'),
+        h('div', { style: 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px;text-align:center' },
+          h('div', {}, h('div', { class: 'hint' }, '収入'), h('div', { style: 'font-weight:800;color:var(--green)' }, yen(inc))),
+          h('div', {}, h('div', { class: 'hint' }, '支出'), h('div', { style: 'font-weight:800;color:var(--pink)' }, yen(exp))),
+          h('div', {}, h('div', { class: 'hint' }, '利益'), h('div', { style: `font-weight:800;color:${profit >= 0 ? 'var(--yellow)' : 'var(--red)'}` }, yen(profit)))),
+        h('div', { class: 'hint', style: 'margin-top:8px' }, '過去の履歴も含む損益です（現金の残高とは別）。取り消した分は引かれています。')),
+      monthly, catCard, liveCard, merchCard);
+  };
+  draw();
+}
+
 function manageView() {
   ++renderId;
   const lb = lastBackup(); const d = daysSince(lb);
   const row = (ico, label, sub, href) => h('a', { class: 'lrow', href }, h('span', { class: 'lico' }, ico), h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, label), h('div', { class: 'lsub' }, sub)), h('span', { class: 'lamt' }, '›'));
   $app.replaceChildren(shell('🛠️ 管理', h('div', {},
+    row('📊', '分析', '月ごとの収支・カテゴリ別・ライブ別・物販の売れ筋', '#/analysis'),
     row('🔁', '定期費用', '毎月・毎年かかる費用を登録。期限が来たらホームでお知らせ', '#/recurring'),
     row('⭐', 'テンプレート', 'よく使う入力を1タップで呼び出す', '#/templates'),
     row('📥', 'Airレジ売上(月ごとにまとめて取り込む)', 'ふだんはライブの画面から取り込めます。日ごとのひも付けの確認はここ', '#/air'),
@@ -1040,6 +1128,7 @@ async function route() {
   if (path === '/loan') return loanView(q.get('mode') || 'loan');
   if (path === '/history') return historyView();
   if (path === '/manage') return manageView();
+  if (path === '/analysis') return analysisView();
   if (path === '/recurring') return recurringView();
   if (path === '/templates') return templatesView();
   if (path === '/backup') return backupView();
