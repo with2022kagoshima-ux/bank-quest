@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=16';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=16';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=17';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=17';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -126,7 +126,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-16'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-17'),
   ]);
 }
 
@@ -965,7 +965,7 @@ async function analysisView() {
           h('div', { style: 'display:flex;justify-content:space-between;font-size:14px;gap:8px' }, h('span', { style: 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, p.name), h('span', { style: 'white-space:nowrap' }, p.qty + '点 ', h('span', { class: 'muted' }, yen(p.gp)))),
           bar(p.qty / maxq * 100, 'var(--cyan)'))),
         h('div', { class: 'hint' }, '右の金額は「定価−原価」の概算粗利。割引・無料は反映していません。'))
-        : h('p', { class: 'empty' }, 'この期間の販売記録はありません（在庫の基準日より前の売上は含みません）'));
+        : h('p', { class: 'empty' }, 'この期間の販売記録はありません（Airレジは取り込んだ分、BASE・個別販売は入力した分を数えます）'));
 
     body.replaceChildren(
       h('div', { class: 'tabs' }, ...Object.entries(PERIODS).map(([k, v]) => h('a', { class: 'tab' + (k === per ? ' on' : ''), href: 'javascript:void(0)', onclick: () => { per = k; try { localStorage.setItem('withi_an_per', k); } catch { /* 無くても動く */ } draw(); } }, v))),

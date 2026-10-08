@@ -215,13 +215,16 @@ const real = {
   // ---- 分析 ----
   async analysis() {
     const all = async q => { const out = []; let off = 0; for (;;) { const page = await rest(`${q}&limit=1000&offset=${off}`); out.push(...page); if (page.length < 1000) break; off += 1000; } return out; };
-    const [rows, moves, products] = await Promise.all([
+    const [rows, moves, airl, products] = await Promise.all([
       all('ledger_effects?select=id,occurred_on,kind,category_id,live_id,pnl_delta&pnl_delta=neq.0&order=id'),
-      all('stock_movements?select=id,variant_id,qty,reason,occurred_on&reason=in.(sale_air,sale_base,sale_direct,reversal)&order=id'),
+      all('stock_movements?select=id,variant_id,qty,reason,occurred_on&reason=in.(sale_base,sale_direct,reversal)&order=id'),
+      all('air_lines?select=id,variant_id,qty,basket:air_baskets(sale_date)&variant_id=not.is.null&order=id'),
       this.products(),
     ]);
     return { rows: rows.map(r => ({ date: r.occurred_on, kind: r.kind, category_id: r.category_id, live_id: r.live_id, pnl: Number(r.pnl_delta) })),
-      moves: moves.map(m => ({ variant_id: m.variant_id, qty: Number(m.qty), date: m.occurred_on })), products };
+      // Airレジの売上は在庫の基準日に関係なく、取り込んだ分すべてを数える(在庫の引き算とは別)
+      moves: [...moves.map(m => ({ variant_id: m.variant_id, qty: Number(m.qty), date: m.occurred_on })),
+        ...airl.filter(l => l.basket).map(l => ({ variant_id: l.variant_id, qty: -Number(l.qty), date: l.basket.sale_date }))], products };
   },
   // ---- ライブ ----
   editEntry: (id, o) => rest('rpc/app_entry_edit', { method: 'POST', body: { p_id: id, p_date: o.date, p_amount: o.amount, p_category: o.category_id || null, p_memo: o.memo || null, p_payer: o.payer_id || null, p_by: o.by } }),
