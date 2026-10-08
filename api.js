@@ -160,6 +160,12 @@ const real = {
   reverse: (id, by) => rest('rpc/app_reverse', { method: 'POST', body: { p_id: id, p_by: by } }),
   // 物販の売上(BASE・個別販売)を、注文・在庫・台帳へ一度に記録する
   merchSale: o => rest('rpc/app_merch_sale', { method: 'POST', body: { p_channel: o.channel, p_date: o.date, p_lines: o.lines, p_received: o.received, p_memo: o.memo || null, p_customer: o.customer || null, p_by: o.by } }),
+  // ---- Airレジ ----
+  async airMap() { const r = await rest('air_item_map?select=menu_norm,type1_norm,type2_norm,variant_id'); return r; },
+  airBaskets: () => rest('air_baskets?select=id,sale_date,txn_no,total,item_count,live_id,date_mismatch,staff_name&order=sale_date.desc,txn_no.desc&limit=2000'),
+  airImports: () => rest('air_imports?select=file_name,target_month,baskets_new,imported_at&order=imported_at.desc&limit=12'),
+  airImport: o => rest('rpc/app_air_import', { method: 'POST', body: { p_file_name: o.file_name, p_hash: o.hash, p_month: o.month, p_baskets: o.baskets, p_map: o.map, p_by: o.by } }),
+  airLink: (date, live, by) => rest('rpc/app_air_link', { method: 'POST', body: { p_date: date, p_live: live || null, p_by: by } }),
   // ---- ライブ ----
   async lives() {
     const [rows, vs, ls] = await Promise.all([
@@ -203,7 +209,7 @@ const real = {
   // ---- 商品・在庫 ----
   async products() {
     const [vs, st] = await Promise.all([
-      rest('product_variants?select=id,size,color,price,cost,is_active,product:products(id,name,category,is_active,image_url,co_share)'),
+      rest('product_variants?select=id,size,color,price,cost,is_active,product:products(id,name,category,is_active,image_url,co_share,air_type1_role,air_type2_role)'),
       rest('v_stock_levels?select=variant_id,stock'),
     ]);
     const stock = new Map(st.map(s => [s.variant_id, Number(s.stock)]));
@@ -260,9 +266,9 @@ function makeDemo() {
   const PR = [];
   const mkp = (name, category, vars, extra = {}) => { const p = { id: 'pr' + (PR.length + 1), name, category, is_active: true, image_url: null, ...extra }; PR.push({ p, vars: vars.map(([size, color, price, cost, stock]) => ({ id: 'v' + (++vn), size, color, price, cost, is_active: true, stock })) }); };
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
-  mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]]);
-  mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5 });
-  const MV = []; const ORD = new Map(); const LV = [];
+  mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]], { air_type1_role: 'color', air_type2_role: 'size' });
+  mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5, air_type1_role: 'size', air_type2_role: null });
+  const MV = []; const ORD = new Map(); const LV = []; const AB = []; const AM = []; const AI = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -298,6 +304,25 @@ function makeDemo() {
         return { ...l, live_id: l.id, venue_name: l.venue, income: pn.filter(x => x > 0).reduce((s, x) => s + x, 0), expense: -pn.filter(x => x < 0).reduce((s, x) => s + x, 0), profit: pn.reduce((s, x) => s + x, 0) }; })
         .sort((x, y) => y.live_date.localeCompare(x.live_date));
     },
+    async airMap() { await wait(); return AM; },
+    async airBaskets() { await wait(); return AB.map(b => ({ ...b })); },
+    async airImports() { await wait(); return AI; },
+    async airImport(o) {
+      await wait(); if (AI.some(x => x.hash === o.hash)) throw new ApiError('このファイルは取り込み済みです');
+      let nw = 0, skipped = 0, stock = 0, linked = 0;
+      for (const m of o.map || []) { const i = AM.findIndex(x => x.menu_norm === m.menu_norm && x.type1_norm === m.type1_norm && x.type2_norm === m.type2_norm); if (i >= 0) AM[i] = m; else AM.push(m); }
+      for (const b of o.baskets) {
+        if (AB.some(x => x.sale_date === b.sale_date && x.txn_no === b.txn_no)) { skipped++; continue; }
+        const total = Number(b.total) || b.lines.reduce((s, l) => s + l.price * l.qty, 0);
+        const same = LV.filter(l => l.live_date === b.sale_date);
+        AB.push({ id: 'b' + (++n), sale_date: b.sale_date, txn_no: b.txn_no, total, item_count: Number(b.item_count) || null, live_id: same.length === 1 ? same[0].id : null, date_mismatch: false, staff_name: b.staff });
+        nw++; if (same.length === 1) linked++;
+        for (const l of b.lines) if (l.variant_id && b.sale_date > '2026-10-07') { const v = PR.flatMap(y => y.vars).find(x => x.id === l.variant_id); if (v) { v.stock -= l.qty; stock++; } }
+      }
+      AI.unshift({ file_name: o.file_name, target_month: o.month, baskets_new: nw, hash: o.hash, imported_at: new Date().toISOString() });
+      return { new: nw, skipped, lines: 0, stock_lines: stock, linked };
+    },
+    async airLink(date, live) { await wait(); let c = 0; for (const b of AB) if (b.sale_date === date) { b.live_id = live || null; c++; } return c; },
     async liveRating() { return null; },
     async venues() { await wait(); return [...new Set(LV.map(l => l.venue).filter(Boolean))].map(n => ({ id: n, name: n, prefecture: '鹿児島' })); },
     async addLive(f) { await wait(); const id = 'L' + (++n); LV.push({ id, live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue: f.venue || '', memo: f.memo || '', status: 'draft', score: null }); return id; },
