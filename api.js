@@ -158,6 +158,8 @@ const real = {
   reimburse: e => rest('rpc/app_reimburse', { method: 'POST', body: { p_party: e.party_id, p_amount: e.amount, p_date: e.date, p_memo: e.memo || null, p_by: e.by } }),
   offset: e => rest('rpc/app_offset', { method: 'POST', body: { p_party: e.party_id, p_amount: e.amount, p_date: e.date, p_memo: e.memo || null, p_by: e.by } }),
   reverse: (id, by) => rest('rpc/app_reverse', { method: 'POST', body: { p_id: id, p_by: by } }),
+  // 物販の売上(BASE・個別販売)を、注文・在庫・台帳へ一度に記録する
+  merchSale: o => rest('rpc/app_merch_sale', { method: 'POST', body: { p_channel: o.channel, p_date: o.date, p_lines: o.lines, p_received: o.received, p_memo: o.memo || null, p_customer: o.customer || null, p_by: o.by } }),
   // ---- 商品・在庫 ----
   async products() {
     const [vs, st] = await Promise.all([
@@ -187,11 +189,12 @@ function makeDemo() {
     { id: 'p2', name: '一道', kind: 'member', can_input: true, can_pay: true },
     { id: 'p3', name: 'かぶ', kind: 'member', can_input: true, can_pay: true },
     { id: 'p4', name: 'スタッフ', kind: 'staff', can_input: true, can_pay: true },
+    { id: 'p5', name: 'STS', kind: 'external', can_input: false, can_pay: true },
   ];
   const mk = (g, f, names) => names.map((n, i) => ({ id: `${g}-${f}-${i}`, group_name: g, flow: f, name: n, sort_order: i }));
   const CATS = [
     ...mk('general', 'income', ['BASE', '物販(個別販売)', 'サブスク収入', 'SNS収入', 'その他']),
-    ...mk('general', 'expense', ['REC・音源制作', '宣伝・デザイン', '駐車場代', 'スタジオ代', '活動機材費', 'サブスク系', 'グッズ・物販制作費', '手数料', '発送・送料', 'その他']),
+    ...mk('general', 'expense', ['REC・音源制作', '宣伝・デザイン', '駐車場代', 'スタジオ代', '活動機材費', 'サブスク系', 'グッズ・物販制作費', '手数料', '発送・送料', 'STS取り分', 'その他']),
   ];
   let n = 0; const id = () => `e${++n}`;
   const E = []; const A = []; // entries, allocations
@@ -218,7 +221,7 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]]);
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5 });
-  const MV = [];
+  const MV = []; const ORD = new Map();
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -255,8 +258,35 @@ function makeDemo() {
     async addProduct(f) { await wait(); mkp(f.name, f.category || null, [[f.size || null, f.color || null, f.price, f.cost, 0]]); },
     async stockMove(m) { await wait(); const o = PR.flatMap(x => x.vars).find(x => x.id === m.variant_id); o.stock += m.qty; MV.unshift({ variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo }); },
     async stockHistory(vid) { await wait(); return MV.filter(x => x.variant_id === vid); },
+    async merchSale(o) {
+      await wait();
+      const vs = allV(); let sales = 0;
+      if (!o.lines || !o.lines.length) throw new ApiError('商品を1つ以上選んでください');
+      for (const l of o.lines) sales += l.qty * l.unit_price;
+      if (!(o.received > 0)) throw new ApiError('受け取った金額を入れてください');
+      if (o.channel === 'base' && o.received > sales) throw new ApiError(`入金額(${o.received}円)が売上(${sales}円)より大きくなっています。確認してください`);
+      const oid = 'o' + (++n); const cat = nm => (CATS.find(c => c.name === nm) || {}).id;
+      const label = o.lines.map(l => { const v = vs.find(x => x.id === l.variant_id); return `${v.product.name} ×${l.qty}`; }).join(' / ');
+      add({ occurred_on: o.date, kind: 'income', amount: o.channel === 'base' ? sales : o.received, category_id: cat(o.channel === 'base' ? 'BASE' : '物販(個別販売)'), memo: o.memo || label, merch_order_id: oid, source: o.channel });
+      if (o.channel === 'base' && sales > o.received) add({ occurred_on: o.date, kind: 'expense_fund', amount: sales - o.received, category_id: cat('手数料'), memo: 'BASE手数料', merch_order_id: oid, source: 'base' });
+      let sts = 0;
+      for (const l of o.lines) { const x = PR.flatMap(y => y.vars.map(v => ({ v, p: y.p }))).find(q => q.v.id === l.variant_id); x.v.stock -= l.qty; MV.unshift({ variant_id: l.variant_id, qty: -l.qty, reason: o.channel === 'base' ? 'sale_base' : 'sale_direct', occurred_on: o.date, memo: o.memo, order_id: oid }); if (x.p.co_share) sts += l.qty * l.unit_price * x.p.co_share; }
+      if (sts > 0) add({ occurred_on: o.date, kind: 'expense_advanced', amount: Math.round(sts), category_id: cat('STS取り分'), memo: '共同物販の取り分 50%', payer_id: 'p5', merch_order_id: oid, source: o.channel });
+      ORD.set(oid, o.lines);
+      return oid;
+    },
     async reverse(rid) {
       await wait(); const e = E.find(x => x.id === rid);
+      if (e.merch_order_id) {
+        const oid = e.merch_order_id;
+        if (E.some(x => x.merch_order_id === oid && x.reverses_id)) throw new ApiError('すでに取り消されています');
+        for (const x of E.filter(q => q.merch_order_id === oid && !q.reverses_id)) {
+          if (x.kind === 'expense_advanced' && A.some(a => a.adv === x.id)) throw new ApiError('この立替には返済が充当されています。先に返済を取り消してください');
+        }
+        for (const x of E.filter(q => q.merch_order_id === oid && !q.reverses_id)) { const { id: _i, created_at: _c, ...rr } = x; add({ ...rr, memo: `取消: ${x.memo || ''}`, reverses_id: x.id }); }
+        for (const l of ORD.get(oid) || []) { PR.flatMap(y => y.vars).find(v => v.id === l.variant_id).stock += l.qty; MV.unshift({ variant_id: l.variant_id, qty: l.qty, reason: 'reversal', occurred_on: ymd(), memo: '売上の取消' }); }
+        return;
+      }
       if (E.some(x => x.reverses_id === rid)) throw new ApiError('すでに取り消されています');
       if (e.kind === 'expense_advanced' && A.some(a => a.adv === rid)) throw new ApiError('この立替には返済が充当されています。先に返済を取り消してください');
       const { id: _i, created_at: _c, ...rest } = e; add({ ...rest, memo: `取消: ${e.memo || ''}`, reverses_id: rid }); for (let i = A.length - 1; i >= 0; i--) if (A[i].rid === rid) A.splice(i, 1);

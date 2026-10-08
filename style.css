@@ -129,3 +129,9 @@ input[type=date]{color-scheme:dark}
 .getfx-sub{font-size:18px;font-weight:800;color:var(--cyan);letter-spacing:.2em}
 @keyframes fx{0%{opacity:0;transform:scale(.6)}20%{opacity:1;transform:scale(1.1)}70%{opacity:1;transform:translateY(-10px)}100%{opacity:0;transform:translateY(-40px)}}
 @media (prefers-reduced-motion:reduce){.getfx,.spin{animation-duration:.01s}}
+.saleline{display:grid;grid-template-columns:1fr auto;gap:8px 10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.saleline .stepper{display:flex;align-items:center;gap:10px}
+.saleline .stepper .chip{min-width:40px;justify-content:center}
+.saleline .amount-wrap.small{padding:2px 10px;max-width:150px}
+.saleline .amount-wrap.small input{width:100%;font-size:16px}
+.saleline .amount-wrap.small input{background:transparent;border:0;box-shadow:none;padding:6px 0;outline:none}

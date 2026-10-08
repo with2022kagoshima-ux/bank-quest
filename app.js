@@ -121,7 +121,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-5'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-6'),
   ]);
 }
 
@@ -174,9 +174,9 @@ async function homeView() {
 }
 
 // ---------- お金が入った / 使った ----------
-function moneyView(isIn) {
+function moneyView(isIn, plain) {
   ++renderId;
-  const cats = state.cats.filter(c => c.group_name === 'general' && c.flow === (isIn ? 'income' : 'expense'));
+  const cats = state.cats.filter(c => c.group_name === 'general' && c.flow === (isIn ? 'income' : 'expense') && c.name !== 'STS取り分');
   const f = { cat: '', payer: '' };
   const amt = amountField();
   const memo = h('input', { type: 'text', placeholder: isIn ? '例: ジミーさん 物販売上金' : '例: 駐車場代 ライブ後', autocomplete: 'off' });
@@ -200,8 +200,12 @@ function moneyView(isIn) {
       location.hash = '#/home';
     } catch (e) { msg.textContent = errMsg(e); submit.disabled = false; }
   } },
-  field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), '', id => { f.cat = id; })),
-  isIn ? h('p', { class: 'hint' }, 'BASE・物販は、商品と在庫の連携を後のフェーズで追加します。今は金額だけ記録します。') : null,
+  field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), '', id => {
+    const nm = (cats.find(c => c.id === id) || {}).name;
+    if (isIn && !plain && (nm === 'BASE' || nm === '物販(個別販売)')) { location.hash = '#/sale?ch=' + (nm === 'BASE' ? 'base' : 'direct'); return; }
+    f.cat = id;
+  })),
+  isIn && !plain ? h('p', { class: 'hint' }, 'BASE・物販(個別販売)を選ぶと、商品と在庫つきで記録する画面に進みます。') : null,
   field('金額', amt.el), field('内容', memo), field('日付', date),
   isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), chips(payers, '', id => { f.payer = id; setHint(); }), payerHint),
   msg, submit);
@@ -290,7 +294,7 @@ async function historyView(limit = 80) {
             r.reversed ? h('i', { class: 'tag dead' }, '取消済み') : null, isRev ? h('i', { class: 'tag dead' }, '取消の行') : null)),
         h('div', { class: 'lamt ' + (sg > 0 ? 'pos' : sg < 0 ? 'neg' : '') }, (sg > 0 ? '+' : sg < 0 ? '−' : '') + yen(r.amount).replace('−', '')),
         canRev ? h('button', { class: 'undo', 'aria-label': 'この記録を取り消す', onclick: async () => {
-          const ok = await confirmBox('この記録を取り消す？', `${r.occurred_on.replaceAll('-', '/')}  ${r.memo || label}  ${yen(r.amount)}\n元の行は消さず、打ち消しの行が追加されます。`, '取り消す');
+          const ok = await confirmBox('この記録を取り消す？', `${r.occurred_on.replaceAll('-', '/')}  ${r.memo || label}  ${yen(r.amount)}\n` + (r.merch_order_id ? 'この売上に関する記録(売上・手数料・STS取り分)と在庫が、まとめて元に戻ります。' : '元の行は消さず、打ち消しの行が追加されます。'), '取り消す');
           if (!ok) return;
           try { await api.reverse(r.id, state.by); toast('取り消しました', 'ok'); historyView(); } catch (e) { toast(errMsg(e), 'err'); }
         } }, '取消') : null));
@@ -466,6 +470,97 @@ async function stockModal(p, v, done) {
   upd();
 }
 
+
+// ---------- 物販の売上(BASE・個別販売) ----------
+async function saleView(channel) {
+  const my = ++renderId;
+  const isBase = channel === 'base';
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell(isBase ? '🛒 BASEの売上' : '🤝 物販(個別販売)', body, '#/in'));
+  let products;
+  try { products = (await api.products()).filter(p => p.is_active); } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, () => saleView(channel))); return; }
+  if (my !== renderId) return;
+  const lines = []; // {v, p, qty, price}
+  let receivedTouched = false;
+  const received = amountField();
+  const memo = h('input', { type: 'text', placeholder: isBase ? '例: 10/5入金分' : '例: ジミーさん 手売り', autocomplete: 'off' });
+  const date = h('input', { type: 'date', value: ymd() });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const linesBox = h('div', {}); const sumBox = h('div', { class: 'card mini' });
+  const total = () => lines.reduce((s, l) => s + l.qty * l.price, 0);
+  const note = h('p', { class: 'hint' }, '');
+  const submit = h('button', { class: 'btn big in', type: 'button' }, '💰 記録する');
+  const redraw = () => {
+    const t = total();
+    if (!receivedTouched) received.set(t || '');
+    linesBox.replaceChildren(...(lines.length ? lines.map((l, i) => {
+      const pr = intField(l.price, '0');
+      pr.addEventListener('input', () => { l.price = numOrNull(pr) || 0; upSum(); });
+      const over = l.qty > l.v.stock;
+      return h('div', { class: 'saleline' },
+        h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, l.p.name), h('div', { class: 'lsub' }, vLabel(l.v) + ` ・在庫${l.v.stock}点`),
+          over ? h('div', { class: 'ltags' }, h('i', { class: 'tag mid' }, '在庫より多い')) : null),
+        h('div', { class: 'stepper' },
+          h('button', { type: 'button', class: 'chip', 'aria-label': '減らす', onclick: () => { l.qty = Math.max(1, l.qty - 1); redraw(); } }, '−'),
+          h('b', {}, l.qty),
+          h('button', { type: 'button', class: 'chip', 'aria-label': '増やす', onclick: () => { l.qty += 1; redraw(); } }, '＋')),
+        h('div', { class: 'amount-wrap small' }, h('span', { class: 'yen' }, '¥'), pr),
+        h('button', { type: 'button', class: 'undo', 'aria-label': '外す', onclick: () => { lines.splice(i, 1); redraw(); } }, '外す'));
+    }) : [h('p', { class: 'empty' }, '下から商品を選んでください。')]));
+    upSum();
+  };
+  const upSum = () => {
+    const t = total(); const r = received.get();
+    const fee = isBase ? t - r : 0;
+    sumBox.replaceChildren(h('div', { class: 'cap' }, '売上 合計'), h('b', {}, yen(t)),
+      isBase && t > 0 && r > 0 ? h('div', { class: fee < 0 ? 'form-err' : 'hint' }, fee < 0 ? '入金額が売上より大きくなっています' : `手数料 ${yen(fee)}（売上 − 入金）を自動で記録します`) : null);
+    const sts = lines.filter(l => l.p.co_share).reduce((s, l) => s + l.qty * l.price * l.p.co_share, 0);
+    note.textContent = sts > 0 ? `共同物販(STS)の取り分 ${yen(Math.round(sts))} を、STSへの未払いとして自動で記録します。` : '';
+  };
+  received.el.querySelector('input').addEventListener('input', () => { receivedTouched = true; upSum(); });
+  const addLine = (p, v) => {
+    const ex = lines.find(l => l.v.id === v.id);
+    if (ex) ex.qty += 1; else lines.push({ v, p, qty: 1, price: v.price });
+    redraw();
+  };
+  const q = h('input', { type: 'text', placeholder: '商品名で探す', autocomplete: 'off' });
+  const list = h('div', { class: 'chips' });
+  const drawList = () => {
+    const t = q.value.trim().toLowerCase();
+    const rows = products.filter(p => !t || p.name.toLowerCase().includes(t)).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    list.replaceChildren(...(rows.length ? rows.map(p => h('button', { type: 'button', class: 'chip', onclick: () => {
+      const vs = p.variants.filter(v => v.is_active);
+      if (vs.length === 1) { addLine(p, vs[0]); return; }
+      const m = modal([h('h3', {}, p.name), h('p', { class: 'muted' }, '種類を選んでください'),
+        h('div', { class: 'chips' }, vs.map(v => h('button', { type: 'button', class: 'chip' + (v.stock <= 0 ? ' dis' : ''), onclick: () => { m.close(); addLine(p, v); } },
+          h('span', { class: 'chip-main' }, vLabel(v)), h('span', { class: 'chip-sub' }, `在庫${v.stock}・${yen(v.price)}`))))]);
+    } }, p.name)) : [h('p', { class: 'empty' }, '該当する商品がありません。')]));
+  };
+  q.addEventListener('input', drawList); drawList();
+  submit.addEventListener('click', async () => {
+    msg.textContent = '';
+    if (!lines.length) { msg.textContent = '商品を1つ以上選んでください'; return; }
+    const t = total(); const r = received.get();
+    if (!(r > 0)) { msg.textContent = isBase ? '入金された金額を入れてください' : '受け取った金額を入れてください'; return; }
+    if (isBase && r > t) { msg.textContent = '入金額が売上より大きくなっています。確認してください'; return; }
+    if (!state.by) { await pickBy(true); if (!state.by) return; }
+    submit.disabled = true;
+    try {
+      await api.merchSale({ channel, date: date.value, lines: lines.map(l => ({ variant_id: l.v.id, qty: l.qty, unit_price: l.price })), received: r, memo: memo.value.trim(), by: state.by });
+      getFx(`+${yen(isBase ? r : r)}`, 'MONEY GET!');
+      location.hash = '#/home';
+    } catch (e) { msg.textContent = errMsg(e); submit.disabled = false; }
+  });
+  body.replaceChildren(h('div', { class: 'form' },
+    field('売った商品', h('div', {}, linesBox)), sumBox, note,
+    field('商品を追加', q), list,
+    field(isBase ? 'BASEから入金された金額' : '受け取った金額', received.el, isBase ? '売上との差が手数料になります' : '値引きしたときは、受け取った額に直してください'),
+    field('内容(メモ)', memo), field('日付', date),
+    h('a', { class: 'hint', href: '#/in?plain=1' }, '商品を選ばず金額だけ記録する'),
+    msg, submit));
+  redraw();
+}
+
 // ---------- ルーター ----------
 function parseHash() {
   const raw = location.hash.replace(/^#/, '') || '/home';
@@ -479,7 +574,8 @@ async function route() {
   if (!state.people.length) { try { await boot(); } catch (e) { $app.replaceChildren(h('div', { class: 'screen' }, errorBox(e, route))); return; } }
   if (!state.by || !state.people.some(p => p.id === state.by)) { state.by = ''; await pickBy(true); }
   window.scrollTo(0, 0);
-  if (path === '/in') return moneyView(true);
+  if (path === '/sale') return saleView(q.get('ch') === 'direct' ? 'direct' : 'base');
+  if (path === '/in') return moneyView(true, q.get('plain') === '1');
   if (path === '/out') return moneyView(false);
   if (path === '/loan') return loanView(q.get('mode') || 'loan');
   if (path === '/history') return historyView();
