@@ -315,10 +315,13 @@ async function merchView() {
     if (my !== renderId) return;
     const q = h('input', { type: 'text', placeholder: '商品名で絞り込む', autocomplete: 'off' });
     const box = h('div', {});
-    let showOld = false;
+    let showOld = false; let sort = localStorage.getItem('withi_merch_sort') || 'name';
+    const SORTS = { name: '名前順', low: '在庫が少ない順', high: '在庫が多い順', cat: 'カテゴリ順' };
+    const sorter = { name: (a, b) => a.name.localeCompare(b.name, 'ja'), low: (a, b) => totalStock(a) - totalStock(b) || a.name.localeCompare(b.name, 'ja'),
+      high: (a, b) => totalStock(b) - totalStock(a) || a.name.localeCompare(b.name, 'ja'), cat: (a, b) => String(a.category || '').localeCompare(String(b.category || ''), 'ja') || a.name.localeCompare(b.name, 'ja') };
     const draw = () => {
       const t = q.value.trim().toLowerCase();
-      const rows = list.filter(p => (showOld || p.is_active) && (!t || p.name.toLowerCase().includes(t)));
+      const rows = list.filter(p => (showOld || p.is_active) && (!t || p.name.toLowerCase().includes(t))).sort(sorter[sort] || sorter.name);
       box.replaceChildren(...(rows.length ? rows.map(p => {
         const tot = totalStock(p);
         return h('a', { class: 'lrow', href: '#/product?id=' + p.id },
@@ -334,6 +337,7 @@ async function merchView() {
     body.replaceChildren(
       h('section', { class: 'card mini' }, h('div', { class: 'cap' }, '📦 販売中の在庫 合計'), h('b', {}, total + '点')),
       h('div', { class: 'with-btn' }, q, h('button', { class: 'btn small', onclick: () => newProductModal() }, '＋商品')),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '並び順'), chips(Object.entries(SORTS).map(([id, label]) => ({ id, label })), sort, id => { sort = id; try { localStorage.setItem('withi_merch_sort', id); } catch { /* 保存できなくても動く */ } draw(); })),
       h('label', { class: 'hint' }, h('input', { type: 'checkbox', onchange: e => { showOld = e.target.checked; draw(); } }), ' 販売終了も表示'),
       box);
     draw();
