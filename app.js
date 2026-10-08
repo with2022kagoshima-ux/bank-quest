@@ -262,12 +262,12 @@ const KIND = {
   income: ['💰', '収入', 1], expense_fund: ['💸', '支出', -1], expense_advanced: ['🧾', '立替', -1], loan: ['👤', '貸した', -1], loan_repay: ['💵', '返済', 1],
   reimburse: ['🔁', '立替を返した', -1], offset: ['⚖️', '相殺', 0], opening_fund: ['🏁', '初期残高', 1], opening_receivable: ['🏁', '初期の借入', 0], opening_payable: ['🏁', '初期の未払い', 0],
 };
-async function historyView() {
+async function historyView(limit = 80) {
   const my = ++renderId;
   const body = h('div', {}, loading());
   $app.replaceChildren(shell('📜 履歴・取消', body));
   try {
-    const rows = await api.ledger();
+    const rows = await api.ledger(limit);
     if (my !== renderId) return;
     if (!rows.length) { body.replaceChildren(h('p', { class: 'empty' }, 'まだ記録がありません。')); return; }
     const list = h('div', { class: 'ledger' });
@@ -285,6 +285,8 @@ async function historyView() {
           h('div', { class: 'lsub' }, [r.category_name, who && (r.kind === 'expense_advanced' ? who + 'が立替' : who), (r.memo || r.category_name) ? label : ''].filter(Boolean).join(' · ') || ' '),
           h('div', { class: 'ltags' },
             r.adv ? h('i', { class: 'tag ' + (r.adv.status === '精算済み' ? 'ok' : r.adv.status === '一部精算' ? 'mid' : 'pay') }, r.adv.status) : null,
+            r.is_historical ? h('i', { class: 'tag dead' }, '過去データ') : null,
+            r.review_flag ? h('i', { class: 'tag mid' }, '要確認') : null,
             r.reversed ? h('i', { class: 'tag dead' }, '取消済み') : null, isRev ? h('i', { class: 'tag dead' }, '取消の行') : null)),
         h('div', { class: 'lamt ' + (sg > 0 ? 'pos' : sg < 0 ? 'neg' : '') }, (sg > 0 ? '+' : sg < 0 ? '−' : '') + yen(r.amount).replace('−', '')),
         canRev ? h('button', { class: 'undo', 'aria-label': 'この記録を取り消す', onclick: async () => {
@@ -293,7 +295,7 @@ async function historyView() {
           try { await api.reverse(r.id, state.by); toast('取り消しました', 'ok'); historyView(); } catch (e) { toast(errMsg(e), 'err'); }
         } }, '取消') : null));
     }
-    body.replaceChildren(list, h('p', { class: 'hint center' }, '直近の記録を表示しています。'));
+    body.replaceChildren(list, rows.length >= limit ? h('button', { class: 'btn ghost', style: 'width:100%', onclick: () => historyView(limit + 100) }, 'もっと見る') : h('p', { class: 'hint center' }, 'ここまでです。'));
   } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, historyView)); }
 }
 
