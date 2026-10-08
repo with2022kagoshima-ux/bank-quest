@@ -172,11 +172,11 @@ const real = {
       memo: e.memo || null, payer_id: e.payer_id || null, party_id: e.party_id || null,
       source: e.live_id ? 'live' : 'manual', live_id: e.live_id || null, posting: 'posted', created_by: e.by,
     };
-    try { await rest('ledger_entries', { method: 'POST', prefer: 'return=minimal', body }); return { queued: false }; }
+    try { await rest('ledger_entries', { method: 'POST', prefer: 'return=minimal', body }); return { queued: false, id: body.id }; }
     catch (err) {
       if (err.code !== 'net') throw err;
       const q = qLoad(); q.push({ body, at: new Date().toISOString() }); qSave(q);
-      return { queued: true };
+      return { queued: true, id: body.id };
     }
   },
   reimburse: e => rest('rpc/app_reimburse', { method: 'POST', body: { p_party: e.party_id, p_amount: e.amount, p_date: e.date, p_memo: e.memo || null, p_by: e.by } }),
@@ -202,7 +202,7 @@ const real = {
   useTemplate: (id, n) => rest(`quick_templates?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: { use_count: n + 1 } }).catch(() => {}),
   async exportAll(progress) {
     const T = ['people', 'categories', 'venues', 'settings', 'lives', 'ledger_entries', 'settlement_allocations', 'products', 'product_variants', 'stock_movements',
-      'air_imports', 'air_baskets', 'air_lines', 'air_item_map', 'merch_orders', 'merch_order_lines', 'base_payouts', 'recurring_rules', 'quick_templates', 'audit_log'];
+      'air_imports', 'air_baskets', 'air_lines', 'air_item_map', 'merch_orders', 'merch_order_lines', 'base_payouts', 'recurring_rules', 'quick_templates', 'receipts', 'audit_log'];
     const out = { app: 'withi-money', exported_at: new Date().toISOString(), tables: {} };
     for (const t of T) {
       if (progress) progress(t);
@@ -227,7 +227,43 @@ const real = {
         ...airl.filter(l => l.basket).map(l => ({ variant_id: l.variant_id, qty: -Number(l.qty), date: l.basket.sale_date }))], products };
   },
   // ---- ライブ ----
-  editEntry: (id, o) => rest('rpc/app_entry_edit', { method: 'POST', body: { p_id: id, p_date: o.date, p_amount: o.amount, p_category: o.category_id || null, p_memo: o.memo || null, p_payer: o.payer_id || null, p_by: o.by } }),
+  async editEntry(id, o) {
+    const nid = await rest('rpc/app_entry_edit', { method: 'POST', body: { p_id: id, p_date: o.date, p_amount: o.amount, p_category: o.category_id || null, p_memo: o.memo || null, p_payer: o.payer_id || null, p_by: o.by } });
+    // 領収書は新しい行へ引き継ぐ(失敗しても修正そのものは完了している)
+    try {
+      const rs = await rest(`receipts?select=path,mime,created_by&entry_id=eq.${id}`);
+      if (rs.length && nid) await rest('receipts', { method: 'POST', prefer: 'return=minimal', body: rs.map(r => ({ entry_id: nid, path: r.path, mime: r.mime, created_by: r.created_by })) });
+    } catch { /* 引き継げなかった場合は、取消済みの行に残る */ }
+    return nid;
+  },
+  // ---- 領収書(写真・PDF) ----
+  receipts: () => rest('receipts?select=id,entry_id&limit=5000'),
+  receiptsOf: id => rest(`receipts?select=id,path,mime&entry_id=eq.${id}&order=created_at`),
+  async addReceipt(entryId, file, by) {
+    const s = await freshSession();
+    const ext = file.type === 'application/pdf' ? 'pdf' : file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+    const path = `${entryId}/${crypto.randomUUID()}.${ext}`;
+    let r;
+    try { r = await fetch(`${C.url}/storage/v1/object/receipts/${path}`, { method: 'POST', headers: { apikey: C.key, Authorization: `Bearer ${s.access}`, 'Content-Type': file.type, 'x-upsert': 'false' }, body: file }); }
+    catch { throw new ApiError('通信できません。電波のある場所でもう一度お試しください。', 'net'); }
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new ApiError(/size|too large|exceed/i.test(j.message || '') ? 'ファイルが大きすぎます(5MBまで)' : (j.message || '領収書を保存できませんでした'), 'api'); }
+    await rest('receipts', { method: 'POST', prefer: 'return=minimal', body: { entry_id: entryId, path, mime: file.type, created_by: by } });
+  },
+  async receiptUrl(path) {
+    const s = await freshSession();
+    const r = await fetch(`${C.url}/storage/v1/object/sign/receipts/${path}`, { method: 'POST', headers: { apikey: C.key, Authorization: `Bearer ${s.access}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn: 3600 }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.signedURL) throw new ApiError('領収書を読み込めませんでした', 'api');
+    return `${C.url}/storage/v1${j.signedURL}`;
+  },
+  async removeReceipt(rc) {
+    await rest(`receipts?id=eq.${rc.id}`, { method: 'DELETE', prefer: 'return=minimal' });
+    const left = await rest(`receipts?select=id&path=eq.${encodeURIComponent(rc.path)}&limit=1`);
+    if (!left.length) {
+      const s = await freshSession();
+      await fetch(`${C.url}/storage/v1/object/receipts/${rc.path}`, { method: 'DELETE', headers: { apikey: C.key, Authorization: `Bearer ${s.access}` } }).catch(() => {});
+    }
+  },
   liveAirStatus: id => rest('rpc/live_air_status', { method: 'POST', body: { p_live: id } }),
   liveAirPost: (id, by) => rest('rpc/app_live_air_post', { method: 'POST', body: { p_live: id, p_by: by } }),
   async lives() {
@@ -331,7 +367,7 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]], { air_type1_role: 'color', air_type2_role: 'size' });
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5, air_type1_role: 'size', air_type2_role: null });
-  const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = [];
+  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -357,7 +393,7 @@ function makeDemo() {
         reversed: E.some(x => x.reverses_id === e.id), adv: av.get(e.id) || null,
       }));
     },
-    async addEntry(e) { await wait(); add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id, live_id: e.live_id || null, source: e.live_id ? 'live' : 'manual' }); },
+    async addEntry(e) { await wait(); const r0 = add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id, live_id: e.live_id || null, source: e.live_id ? 'live' : 'manual' }); return { queued: false, id: r0.id }; },
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
     async offset(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable || e.amount > b.recv) throw new ApiError(`相殺できるのは、未払い残(${b.payable}円)と借入残(${b.recv}円)の小さい方までです`); const r = add({ occurred_on: e.date, kind: 'offset', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
 
@@ -403,9 +439,15 @@ function makeDemo() {
     async removeTemplate(id) { await wait(); TP.find(t => t.id === id).is_active = false; },
     async useTemplate(id) { const t = TP.find(x => x.id === id); if (t) t.use_count++; },
     async exportAll() { await wait(); return { app: 'withi-money', demo: true, exported_at: new Date().toISOString(), tables: { ledger_entries: E } }; },
+    async receipts() { await wait(); return RC.map(r => ({ id: r.id, entry_id: r.entry_id })); },
+    async receiptsOf(id) { await wait(); return RC.filter(r => r.entry_id === id).map(r => ({ id: r.id, path: r.path, mime: r.mime })); },
+    async addReceipt(entryId, file) { await wait(); RC.push({ id: 'rc' + (++n), entry_id: entryId, path: URL.createObjectURL(file), mime: file.type }); },
+    async receiptUrl(path) { return path; },
+    async removeReceipt(rc) { await wait(); const i = RC.findIndex(r => r.id === rc.id); if (i >= 0) RC.splice(i, 1); },
     async editEntry(id, o) {
       await this.reverse(id); const e = E.find(x => x.id === id);
-      add({ occurred_on: o.date, kind: e.kind === 'income' ? 'income' : (o.payer_id ? 'expense_advanced' : 'expense_fund'), amount: o.amount, category_id: o.category_id, memo: o.memo, payer_id: e.kind === 'income' ? null : o.payer_id, live_id: e.live_id, source: e.source });
+      const ne = add({ occurred_on: o.date, kind: e.kind === 'income' ? 'income' : (o.payer_id ? 'expense_advanced' : 'expense_fund'), amount: o.amount, category_id: o.category_id, memo: o.memo, payer_id: e.kind === 'income' ? null : o.payer_id, live_id: e.live_id, source: e.source });
+      for (const r of RC.filter(r => r.entry_id === id)) RC.push({ ...r, id: 'rc' + (++n), entry_id: ne.id });
     },
     async liveAirStatus(id) {
       await wait(); const bs = AB.filter(b => b.live_id === id); const sales = bs.reduce((s, b) => s + b.total, 0);

@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=19';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=19';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=20';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=20';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -107,6 +107,71 @@ function thumb(p, big) {
   img.addEventListener('error', () => { if (img.parentNode) img.replaceWith(...(big ? [] : [fb()])); });
   return img;
 }
+// ---------- 領収書(撮影・アップロード) ----------
+async function shrinkImage(file) {
+  if (file.type === 'application/pdf') return file;
+  if (!/^image\//.test(file.type)) throw new Error('画像かPDFを選んでください');
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.72));
+    if (blob) return new File([blob], 'receipt.jpg', { type: 'image/jpeg' });
+  } catch { /* 縮小できない形式は、そのまま送る */ }
+  if (file.size > 5 * 1024 * 1024) throw new Error('ファイルが大きすぎます(5MBまで)');
+  return file;
+}
+function receiptPicker() {
+  const files = [];
+  const strip = h('div', { class: 'rthumbs' });
+  const draw = () => strip.replaceChildren(...files.map((f, i) => h('div', { class: 'rthumb' },
+    f.type === 'application/pdf' ? h('span', { class: 'rpdf' }, 'PDF') : h('img', { src: URL.createObjectURL(f), alt: '' }),
+    h('button', { type: 'button', class: 'rx', 'aria-label': '外す', onclick: () => { files.splice(i, 1); draw(); } }, '✕'))));
+  const mk = (label, attrs) => {
+    const inp = h('input', { type: 'file', style: 'display:none', ...attrs });
+    inp.addEventListener('change', async () => {
+      for (const f of [...inp.files]) { try { files.push(await shrinkImage(f)); } catch (e) { toast(e.message || '読み込めませんでした', 'err'); } }
+      inp.value = ''; draw();
+    });
+    return h('span', {}, inp, h('button', { type: 'button', class: 'btn ghost small', onclick: () => inp.click() }, label));
+  };
+  const el = h('div', { class: 'field' }, h('span', { class: 'field-label' }, '🧾 領収書(あとからでもOK)'),
+    h('div', { class: 'with-btn', style: 'gap:8px;flex-wrap:wrap' }, mk('📷 撮影する', { accept: 'image/*', capture: 'environment' }), mk('🖼 写真・PDFを選ぶ', { accept: 'image/*,application/pdf', multiple: true })), strip);
+  return { el, files: () => files.slice() };
+}
+async function uploadReceipts(entryId, files) {
+  let fail = 0;
+  for (const f of files) { try { await api.addReceipt(entryId, f, state.by); } catch (e) { fail++; } }
+  if (fail) toast(`領収書${fail}枚を保存できませんでした。履歴の🧾からもう一度追加できます`, 'err');
+}
+async function receiptModal(entry, done) {
+  const list = h('div', { class: 'rthumbs' }, loading());
+  const picker = receiptPicker();
+  const m = modal([h('h3', {}, '🧾 領収書'), h('p', { class: 'muted' }, `${String(entry.occurred_on).slice(5).replace('-', '/')}  ${entry.memo || entry.category_name || ''}  ${yen(entry.amount)}`),
+    list, picker.el,
+    h('button', { class: 'btn big out', onclick: async e => {
+      const fs = picker.files(); if (!fs.length) { m.close(); done(); return; }
+      e.target.disabled = true; await uploadReceipts(entry.id, fs); m.close(); toast('領収書を保存しました', 'ok'); done();
+    } }, '保存して閉じる')]);
+  const draw = async () => {
+    try {
+      const rs = await api.receiptsOf(entry.id);
+      const urls = await Promise.all(rs.map(r => api.receiptUrl(r.path).catch(() => null)));
+      list.replaceChildren(...(rs.length ? rs.map((r, i) => h('div', { class: 'rthumb big' },
+        r.mime === 'application/pdf' ? h('a', { class: 'rpdf', href: urls[i] || '#', target: '_blank', rel: 'noopener' }, 'PDF') : h('a', { href: urls[i] || '#', target: '_blank', rel: 'noopener' }, h('img', { src: urls[i] || '', alt: '領収書' })),
+        h('button', { type: 'button', class: 'rx', 'aria-label': '削除', onclick: async () => {
+          if (!(await confirmBox('この領収書を削除する？', '写真は完全に消えます。', '削除する'))) return;
+          try { await api.removeReceipt(r); await draw(); } catch (er) { toast(errMsg(er), 'err'); }
+        } }, '🗑'))) : [h('p', { class: 'hint' }, 'まだ領収書がありません。')]));
+    } catch (e) { list.replaceChildren(h('p', { class: 'form-err' }, errMsg(e))); }
+  };
+  draw();
+}
+const receiptBtn = (r, counts, done) => (['expense_fund', 'expense_advanced'].includes(r.kind) && !r.reverses_id)
+  ? h('button', { class: 'undo', 'aria-label': '領収書', onclick: () => receiptModal(r, done) }, '🧾' + ((counts.get(r.id) || 0) ? ' ' + counts.get(r.id) : '')) : null;
+const countMap = rows => { const m = new Map(); for (const x of rows) m.set(x.entry_id, (m.get(x.entry_id) || 0) + 1); return m; };
+
 function loading() { return h('div', { class: 'loading' }, h('div', { class: 'spin' }), '読み込み中…'); }
 function errorBox(e, retry) {
   return h('div', { class: 'errbox' }, h('p', {}, '⚠️ ' + errMsg(e)),
@@ -134,7 +199,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-19'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-20'),
   ]);
 }
 
@@ -240,6 +305,7 @@ function moneyView(isIn, plain) {
       if (!isIn) { f.payer = t.payer_id || ''; payerChips.select(f.payer); setHint(); }
     } }, t.label)))));
   }).catch(() => {});
+  const rcp = isIn ? null : receiptPicker();
   const form = h('form', { class: 'form', onsubmit: async ev => {
     ev.preventDefault(); msg.textContent = '';
     const a = amt.get();
@@ -250,7 +316,9 @@ function moneyView(isIn, plain) {
     try {
       const res = await api.addEntry({ date: date.value, kind: isIn ? 'income' : (f.payer ? 'expense_advanced' : 'expense_fund'), amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), by: state.by });
       if (usedTpl) api.useTemplate(usedTpl.id, usedTpl.use_count || 0);
-      if (res && res.queued) toast('電波がないため、保存待ちにしました。つながると自動で送ります', 'ok');
+      const rf = rcp ? rcp.files() : [];
+      if (res && res.queued) toast(rf.length ? '電波がないため保存待ちにしました。領収書は、つながってから履歴の🧾で追加してください' : '電波がないため、保存待ちにしました。つながると自動で送ります', 'ok');
+      else if (rf.length && res && res.id) { await uploadReceipts(res.id, rf); getFx(isIn ? `+${yen(a)}` : `−${yen(a)}`, isIn ? 'MONEY GET!' : (f.payer ? '立替を記録' : 'PAID')); }
       else getFx(isIn ? `+${yen(a)}` : `−${yen(a)}`, isIn ? 'MONEY GET!' : (f.payer ? '立替を記録' : 'PAID'));
       location.hash = '#/home';
     } catch (e) { msg.textContent = errMsg(e); submit.disabled = false; }
@@ -260,6 +328,7 @@ function moneyView(isIn, plain) {
   isIn && !plain ? h('p', { class: 'hint' }, 'BASE・物販(個別販売)を選ぶと、商品と在庫つきで記録する画面に進みます。') : null,
   field('金額', amt.el), field('内容', memo), field('日付', date),
   isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), payerChips, payerHint),
+  rcp ? rcp.el : null,
   msg, submit,
   h('button', { type: 'button', class: 'btn ghost', style: 'width:100%', onclick: () => saveTplModal({ kind: isIn ? 'income' : 'expense', category_id: f.cat, amount: amt.get(), memo: memo.value.trim(), payer_id: f.payer }) }, '⭐ この内容をテンプレートに保存'));
   $app.replaceChildren(shell(isIn ? '💰 お金が入った' : '💸 お金を使った', form));
@@ -325,8 +394,9 @@ async function historyView(limit = 80) {
   const body = h('div', {}, loading());
   $app.replaceChildren(shell('📜 履歴・取消', body));
   try {
-    const rows = await api.ledger(limit);
+    const [rows, rcs] = await Promise.all([api.ledger(limit), api.receipts().catch(() => [])]);
     if (my !== renderId) return;
+    const rcm = countMap(rcs);
     if (!rows.length) { body.replaceChildren(h('p', { class: 'empty' }, 'まだ記録がありません。')); return; }
     const list = h('div', { class: 'ledger' });
     let last = '';
@@ -351,7 +421,8 @@ async function historyView(limit = 80) {
           const ok = await confirmBox('この記録を取り消す？', `${r.occurred_on.replaceAll('-', '/')}  ${r.memo || label}  ${yen(r.amount)}\n` + (r.merch_order_id ? 'この売上に関する記録(売上・手数料・STS取り分)と在庫が、まとめて元に戻ります。' : r.is_historical ? '過去データの取り消しです。元の行は消さず、打ち消しの行が追加されます。資金や貸借には影響しません(損益の集計だけが戻ります)。' : '元の行は消さず、打ち消しの行が追加されます。'), '取り消す');
           if (!ok) return;
           try { await api.reverse(r.id, state.by); toast('取り消しました', 'ok'); historyView(); } catch (e) { toast(errMsg(e), 'err'); }
-        } }, '取消') : null));
+        } }, '取消') : null,
+        receiptBtn(r, rcm, () => historyView(limit))));
     }
     body.replaceChildren(list, rows.length >= limit ? h('button', { class: 'btn ghost', style: 'width:100%', onclick: () => historyView(limit + 100) }, 'もっと見る') : h('p', { class: 'hint center' }, 'ここまでです。'));
   } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, historyView)); }
@@ -690,6 +761,7 @@ function liveEntryModal(live, isIn, done, entry) {
   const msg = h('p', { class: 'form-err', role: 'alert' });
   const payers = [{ id: '', label: 'Wiθ資金' }, ...state.people.filter(p => p.can_pay).map(p => ({ id: p.id, label: p.name }))];
   const hint = h('span', { class: 'hint' }, f.payer ? `立替: 資金は減らず、${nameOf(f.payer)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。');
+  const rcp = isIn || entry ? null : receiptPicker();
   const ok = h('button', { class: 'btn big ' + (isIn ? 'in' : 'out'), onclick: async () => {
     msg.textContent = ''; const a = amt.get();
     if (!f.cat) { msg.textContent = 'カテゴリを選んでください'; return; }
@@ -701,7 +773,9 @@ function liveEntryModal(live, isIn, done, entry) {
         await api.editEntry(entry.id, { date: date.value, amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), by: state.by });
         m.close(); toast('修正しました', 'ok'); done(); return;
       }
-      await api.addEntry({ date: date.value, kind: isIn ? 'income' : (f.payer ? 'expense_advanced' : 'expense_fund'), amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), live_id: live.id, by: state.by });
+      const res = await api.addEntry({ date: date.value, kind: isIn ? 'income' : (f.payer ? 'expense_advanced' : 'expense_fund'), amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), live_id: live.id, by: state.by });
+      const rf = rcp ? rcp.files() : [];
+      if (rf.length && res && res.id) await uploadReceipts(res.id, rf);
       m.close(); getFx(isIn ? `+${yen(a)}` : `−${yen(a)}`, isIn ? 'MONEY GET!' : (f.payer ? '立替を記録' : 'PAID')); done();
     } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
   } }, '記録する');
@@ -710,6 +784,7 @@ function liveEntryModal(live, isIn, done, entry) {
     field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), f.cat, id => { f.cat = id; })),
     field('金額', amt.el), field('内容', memo), field('日付', date),
     isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), chips(payers, f.payer, id => { f.payer = id; hint.textContent = id ? `立替: 資金は減らず、${nameOf(id)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。'; }), hint),
+    rcp ? rcp.el : null,
     msg, ok]);
 }
 
@@ -718,7 +793,8 @@ async function liveView(id) {
   const body = h('div', {}, loading());
   $app.replaceChildren(shell('🎸 ライブ', body, '#/live-list'));
   try {
-    const [lives, entries, abs, ast] = await Promise.all([api.lives(), api.liveEntries(id), api.airBaskets().catch(() => []), api.liveAirStatus(id).catch(() => null)]);
+    const [lives, entries, abs, ast, rcs] = await Promise.all([api.lives(), api.liveEntries(id), api.airBaskets().catch(() => []), api.liveAirStatus(id).catch(() => null), api.receipts().catch(() => [])]);
+    const rcm = countMap(rcs);
     if (my !== renderId) return;
     const l = lives.find(x => x.id === id);
     if (!l) { body.replaceChildren(h('p', { class: 'empty' }, 'ライブが見つかりません。')); return; }
@@ -737,6 +813,7 @@ async function liveView(id) {
           h('div', { class: 'ltags' }, r.reversed ? h('i', { class: 'tag dead' }, '取消済み') : null, isRev ? h('i', { class: 'tag dead' }, '取消の行') : null)),
         h('div', { class: 'lamt ' + (sg > 0 ? 'pos' : 'neg') }, (sg > 0 ? '+' : '−') + yen(r.amount).replace('−', '')),
         canEdit ? h('button', { class: 'undo', onclick: () => liveEntryModal(l, r.kind === 'income', reload, r) }, '編集') : null,
+        receiptBtn(r, rcm, reload),
         canRev ? h('button', { class: 'undo', onclick: async () => {
           const ok = await confirmBox('この記録を取り消す？', `${r.memo || r.category_name}  ${yen(r.amount)}\n元の行は消さず、打ち消しの行が追加されます。`, '取り消す');
           if (!ok) return;

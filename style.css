@@ -140,3 +140,10 @@ input[type=date]{color-scheme:dark}
 
 .pimg{width:44px;height:44px;border-radius:10px;object-fit:cover;background:#fff1;flex:none}
 .pimg.big{width:100%;max-width:260px;height:auto;aspect-ratio:1;display:block;margin:0 auto 12px;border-radius:14px}
+
+.rthumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.rthumb{position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;background:#fff1;border:1px solid var(--line)}
+.rthumb.big{width:96px;height:96px}
+.rthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.rpdf{display:grid;place-items:center;width:100%;height:100%;font-weight:800;color:var(--yellow)}
+.rx{position:absolute;top:2px;right:2px;width:24px;height:24px;border-radius:50%;border:0;background:#000b;color:#fff;font-size:12px;line-height:1;cursor:pointer}
