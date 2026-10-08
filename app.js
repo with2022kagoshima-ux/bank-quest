@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=12';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=12';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=13';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=13';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -126,7 +126,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-12'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-13'),
   ]);
 }
 
@@ -183,7 +183,7 @@ async function homeView() {
         btn('in', '💰', 'お金が入った', '#/in'), btn('out', '💸', 'お金を使った', '#/out'),
         btn('loan', '👤', 'メンバーがWiθのお金を借りた', '#/loan?mode=loan'), btn('repay', '💵', 'メンバーが返済した', '#/loan?mode=repay'),
         btn('reim', '🔁', '立替を返す・相殺', '#/loan?mode=reimburse'), btn('hist', '📜', '履歴・取消', '#/history'),
-        btn('live', '🎸', 'ライブ', '#/live-list'), btn('merch', '👕', '商品・在庫', '#/merch'), btn('air', '📥', 'Airレジ売上', '#/air'), btn('manage', '🛠️', '管理', '#/manage', '定期費用・テンプレ・バックアップ')),
+        btn('live', '🎸', 'ライブ', '#/live-list'), btn('merch', '👕', '商品・在庫', '#/merch'), btn('manage', '🛠️', '管理', '#/manage', '定期費用・テンプレ・バックアップ')),
       d.balances.some(b => b.owes_withi || b.withi_owes) ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '👥 メンバーごと'),
         d.balances.filter(b => b.owes_withi || b.withi_owes).map(b => h('div', { class: 'brow' }, h('span', {}, b.name),
           h('span', {}, b.owes_withi ? h('i', { class: 'tag recv' }, '借入 ' + yen(b.owes_withi)) : null, b.withi_owes ? h('i', { class: 'tag pay' }, '未払い ' + yen(b.withi_owes)) : null)))) : null);
@@ -311,6 +311,7 @@ const KIND = {
   income: ['💰', '収入', 1], expense_fund: ['💸', '支出', -1], expense_advanced: ['🧾', '立替', -1], loan: ['👤', '貸した', -1], loan_repay: ['💵', '返済', 1],
   reimburse: ['🔁', '立替を返した', -1], offset: ['⚖️', '相殺', 0], opening_fund: ['🏁', '初期残高', 1], opening_receivable: ['🏁', '初期の借入', 0], opening_payable: ['🏁', '初期の未払い', 0],
 };
+const timeJst = iso => { try { return new Date(iso).toLocaleTimeString('ja-JP', { timeZone: 'Asia/Tokyo', hour12: false }); } catch { return ''; } };
 async function historyView(limit = 80) {
   const my = ++renderId;
   const body = h('div', {}, loading());
@@ -331,7 +332,7 @@ async function historyView(limit = 80) {
         h('span', { class: 'lico' }, ico),
         h('div', { class: 'lmain' },
           h('div', { class: 'lmemo' }, r.memo || r.category_name || label),
-          h('div', { class: 'lsub' }, [r.category_name, who && (r.kind === 'expense_advanced' ? who + 'が立替' : who), (r.memo || r.category_name) ? label : ''].filter(Boolean).join(' · ') || ' '),
+          h('div', { class: 'lsub' }, [r.is_historical ? '' : timeJst(r.created_at), r.category_name, who && (r.kind === 'expense_advanced' ? who + 'が立替' : who), (r.memo || r.category_name) ? label : ''].filter(Boolean).join(' · ') || ' '),
           h('div', { class: 'ltags' },
             r.adv ? h('i', { class: 'tag ' + (r.adv.status === '精算済み' ? 'ok' : r.adv.status === '一部精算' ? 'mid' : 'pay') }, r.adv.status) : null,
             r.is_historical ? h('i', { class: 'tag dead' }, '過去データ') : null,
@@ -892,6 +893,7 @@ function manageView() {
   $app.replaceChildren(shell('🛠️ 管理', h('div', {},
     row('🔁', '定期費用', '毎月・毎年かかる費用を登録。期限が来たらホームでお知らせ', '#/recurring'),
     row('⭐', 'テンプレート', 'よく使う入力を1タップで呼び出す', '#/templates'),
+    row('📥', 'Airレジ売上(月ごとにまとめて取り込む)', 'ふだんはライブの画面から取り込めます。日ごとのひも付けの確認はここ', '#/air'),
     row('💾', 'バックアップ', lb ? `最後に作った日: ${dshow(lb)}（${d}日前）` : 'まだ作っていません', '#/backup'))));
 }
 
