@@ -211,6 +211,7 @@ const real = {
     return out;
   },
   // ---- ライブ ----
+  editEntry: (id, o) => rest('rpc/app_entry_edit', { method: 'POST', body: { p_id: id, p_date: o.date, p_amount: o.amount, p_category: o.category_id || null, p_memo: o.memo || null, p_payer: o.payer_id || null, p_by: o.by } }),
   liveAirStatus: id => rest('rpc/live_air_status', { method: 'POST', body: { p_live: id } }),
   liveAirPost: (id, by) => rest('rpc/app_live_air_post', { method: 'POST', body: { p_live: id, p_by: by } }),
   async lives() {
@@ -347,7 +348,7 @@ function makeDemo() {
     async lives() {
       await wait();
       return LV.map(l => { const es = E.filter(e => e.live_id === l.id); const pn = es.map(e => sign(e) * ((eff(e).pnl) || 0));
-        return { ...l, live_id: l.id, venue_name: l.venue, income: pn.filter(x => x > 0).reduce((s, x) => s + x, 0), expense: -pn.filter(x => x < 0).reduce((s, x) => s + x, 0), profit: pn.reduce((s, x) => s + x, 0) }; })
+        return { ...l, live_id: l.id, venue_name: l.venue, income: es.filter(e => e.kind === 'income').reduce((s, e) => s + sign(e) * e.amount, 0), expense: es.filter(e => e.kind !== 'income').reduce((s, e) => s + sign(e) * e.amount, 0), profit: pn.reduce((s, x) => s + x, 0) }; })
         .sort((x, y) => y.live_date.localeCompare(x.live_date));
     },
     async airMap() { await wait(); return AM; },
@@ -380,6 +381,10 @@ function makeDemo() {
     async removeTemplate(id) { await wait(); TP.find(t => t.id === id).is_active = false; },
     async useTemplate(id) { const t = TP.find(x => x.id === id); if (t) t.use_count++; },
     async exportAll() { await wait(); return { app: 'withi-money', demo: true, exported_at: new Date().toISOString(), tables: { ledger_entries: E } }; },
+    async editEntry(id, o) {
+      await this.reverse(id); const e = E.find(x => x.id === id);
+      add({ occurred_on: o.date, kind: e.kind === 'income' ? 'income' : (o.payer_id ? 'expense_advanced' : 'expense_fund'), amount: o.amount, category_id: o.category_id, memo: o.memo, payer_id: e.kind === 'income' ? null : o.payer_id, live_id: e.live_id, source: e.source });
+    },
     async liveAirStatus(id) {
       await wait(); const bs = AB.filter(b => b.live_id === id); const sales = bs.reduce((s, b) => s + b.total, 0);
       const inc = e => (e.live_id === id && !e.reverses_id && !E.some(x => x.reverses_id === e.id));

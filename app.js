@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=13';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=13';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=14';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=14';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -126,7 +126,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-13'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-14'),
   ]);
 }
 
@@ -673,14 +673,14 @@ async function liveModal(live, done) {
     field('ライブ名', name), field('日付', date), field('会場', venue), dl, field('都道府県', pref), field('メモ', memo), msg, ok]);
 }
 
-function liveEntryModal(live, isIn, done) {
+function liveEntryModal(live, isIn, done, entry) {
   const cats = state.cats.filter(c => c.group_name === live.kind && c.flow === (isIn ? 'income' : 'expense'));
-  const f = { cat: '', payer: '' };
-  const amt = amountField(); const memo = h('input', { type: 'text', placeholder: isIn ? '例: ギャラ' : '例: 駐車場代', autocomplete: 'off' });
-  const date = h('input', { type: 'date', value: String(live.live_date).slice(0, 10) });
+  const f = { cat: entry ? entry.category_id || '' : '', payer: entry && entry.kind === 'expense_advanced' ? entry.payer_id || '' : '' };
+  const amt = amountField(entry ? entry.amount : 0); const memo = h('input', { type: 'text', placeholder: isIn ? '例: ギャラ' : '例: 駐車場代', autocomplete: 'off', value: entry ? entry.memo || '' : '' });
+  const date = h('input', { type: 'date', value: String(entry ? entry.occurred_on : live.live_date).slice(0, 10) });
   const msg = h('p', { class: 'form-err', role: 'alert' });
   const payers = [{ id: '', label: 'Wiθ資金' }, ...state.people.filter(p => p.can_pay).map(p => ({ id: p.id, label: p.name }))];
-  const hint = h('span', { class: 'hint' }, 'Wiθの資金から支払います。資金が減ります。');
+  const hint = h('span', { class: 'hint' }, f.payer ? `立替: 資金は減らず、${nameOf(f.payer)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。');
   const ok = h('button', { class: 'btn big ' + (isIn ? 'in' : 'out'), onclick: async () => {
     msg.textContent = ''; const a = amt.get();
     if (!f.cat) { msg.textContent = 'カテゴリを選んでください'; return; }
@@ -688,14 +688,19 @@ function liveEntryModal(live, isIn, done) {
     if (!state.by) { await pickBy(true); if (!state.by) return; }
     ok.disabled = true;
     try {
+      if (entry) {
+        await api.editEntry(entry.id, { date: date.value, amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), by: state.by });
+        m.close(); toast('修正しました', 'ok'); done(); return;
+      }
       await api.addEntry({ date: date.value, kind: isIn ? 'income' : (f.payer ? 'expense_advanced' : 'expense_fund'), amount: a, category_id: f.cat, memo: memo.value.trim(), payer_id: isIn ? null : (f.payer || null), live_id: live.id, by: state.by });
       m.close(); getFx(isIn ? `+${yen(a)}` : `−${yen(a)}`, isIn ? 'MONEY GET!' : (f.payer ? '立替を記録' : 'PAID')); done();
     } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
   } }, '記録する');
-  const m = modal([h('h3', {}, (isIn ? '💰 収入 ' : '💸 支出 ') + '— ' + live.event_name),
-    field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), '', id => { f.cat = id; })),
+  const m = modal([h('h3', {}, (entry ? '✏️ 修正: ' : '') + (isIn ? '💰 収入 ' : '💸 支出 ') + '— ' + live.event_name),
+    entry ? h('p', { class: 'muted' }, '元の記録は「取消済み」として残り、直した内容が新しく追加されます。') : null,
+    field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), f.cat, id => { f.cat = id; })),
     field('金額', amt.el), field('内容', memo), field('日付', date),
-    isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), chips(payers, '', id => { f.payer = id; hint.textContent = id ? `立替: 資金は減らず、${nameOf(id)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。'; }), hint),
+    isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), chips(payers, f.payer, id => { f.payer = id; hint.textContent = id ? `立替: 資金は減らず、${nameOf(id)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。'; }), hint),
     msg, ok]);
 }
 
@@ -715,12 +720,14 @@ async function liveView(id) {
       const isRev = !!r.reverses_id; const inc = r.kind === 'income';
       const sg = isRev ? (inc ? -1 : 1) : (inc ? 1 : -1);
       const canRev = !isRev && !r.reversed && !conf;
+      const canEdit = canRev && !r.merch_order_id && ['income', 'expense_fund', 'expense_advanced'].includes(r.kind);
       return h('div', { class: 'lrow' + (r.reversed || isRev ? ' dead' : '') },
         h('span', { class: 'lico' }, inc ? '💰' : '💸'),
         h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, r.memo || r.category_name || ''),
           h('div', { class: 'lsub' }, [r.category_name, r.kind === 'expense_advanced' && r.payer_name ? r.payer_name + 'が立替' : ''].filter(Boolean).join(' · ') || ' '),
           h('div', { class: 'ltags' }, r.reversed ? h('i', { class: 'tag dead' }, '取消済み') : null, isRev ? h('i', { class: 'tag dead' }, '取消の行') : null)),
         h('div', { class: 'lamt ' + (sg > 0 ? 'pos' : 'neg') }, (sg > 0 ? '+' : '−') + yen(r.amount).replace('−', '')),
+        canEdit ? h('button', { class: 'undo', onclick: () => liveEntryModal(l, r.kind === 'income', reload, r) }, '編集') : null,
         canRev ? h('button', { class: 'undo', onclick: async () => {
           const ok = await confirmBox('この記録を取り消す？', `${r.memo || r.category_name}  ${yen(r.amount)}\n元の行は消さず、打ち消しの行が追加されます。`, '取り消す');
           if (!ok) return;
