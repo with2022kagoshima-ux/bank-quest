@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=21';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=21';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=22';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=22';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-21'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-22'),
   ]);
 }
 
@@ -241,7 +241,7 @@ async function homeView() {
         h('p', { class: 'hint' }, '電波がなかったため、スマホに一時保存しています。つながると自動で送ります。'),
         h('button', { class: 'btn small', onclick: async () => { const r = await flushQueue(); toast(r.left ? `${r.sent}件送りました。残り${r.left}件` : '送りました', r.left ? 'err' : 'ok'); homeView(); } }, '今すぐ送る')) : null,
       dueRules.length ? h('section', { class: 'card', style: 'border-color:var(--pink)' }, h('div', { class: 'cap' }, `🔁 定期費用のお知らせ(${dueRules.length}件)`),
-        ...dueRules.slice(0, 5).map(r => h('div', { class: 'brow' }, h('span', {}, `${r.name} ${yen(r.amount)}`, h('small', { style: 'display:block;color:var(--muted)' }, dshow(r.next_due) + ' ・' + dueText(dayDiff(r.next_due, ymd())) + (r.payer ? ' ・' + r.payer.name + 'が立替' : ''))),
+        ...dueRules.slice(0, 5).map(r => h('div', { class: 'brow due' }, h('span', {}, `${r.name} ${yen(r.amount)}`, h('small', { style: 'display:block;color:var(--muted)' }, dshow(r.next_due) + ' ・' + dueText(dayDiff(r.next_due, ymd())) + (r.payer ? ' ・' + r.payer.name + 'が立替' : ''))),
           h('span', {}, h('button', { class: 'undo', onclick: async () => { if (!state.by) { await pickBy(true); if (!state.by) return; } try { await api.postRecurring({ rule: r.id, date: (String(r.next_due).slice(0, 10) > ymd() ? ymd() : String(r.next_due).slice(0, 10)), skip: false, by: state.by }); getFx('−' + yen(r.amount), r.payer ? '立替を記録' : 'PAID'); homeView(); } catch (e) { toast(errMsg(e), 'err'); } } }, '記録する'),
             h('button', { class: 'undo', onclick: async () => { if (await confirmBox('今回はとばす？', `${r.name} ${dshow(r.next_due)} 分は記録せず、次の回に進めます。`, 'とばす')) { try { await api.postRecurring({ rule: r.id, date: String(r.next_due).slice(0, 10), skip: true, by: state.by }); homeView(); } catch (e) { toast(errMsg(e), 'err'); } } } }, 'とばす'))))) : null,
       !DEMO && (bd == null || bd >= 30) ? h('a', { class: 'card', href: '#/backup', style: 'display:block' }, h('div', { class: 'cap' }, '💾 バックアップ'), h('p', { class: 'hint' }, bd == null ? 'まだバックアップを作っていません。タップして作る' : `最後のバックアップから${bd}日たっています。タップして作る`)) : null,
