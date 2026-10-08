@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=20';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=20';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=21';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=21';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -172,6 +172,10 @@ const receiptBtn = (r, counts, done) => (['expense_fund', 'expense_advanced'].in
   ? h('button', { class: 'undo', 'aria-label': '領収書', onclick: () => receiptModal(r, done) }, '🧾' + ((counts.get(r.id) || 0) ? ' ' + counts.get(r.id) : '')) : null;
 const countMap = rows => { const m = new Map(); for (const x of rows) m.set(x.entry_id, (m.get(x.entry_id) || 0) + 1); return m; };
 
+// 定期費用: 期限の何日前からお知らせするか(ルールごと)
+const dayDiff = (due, today) => Math.round((new Date(String(due).slice(0, 10) + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+const dueText = d => (d < 0 ? `${-d}日すぎています` : d === 0 ? '今日が支払日' : `あと${d}日`);
+const isNoticeTime = (r, today) => r.is_active && dayDiff(r.next_due, today) <= (r.notice_days == null ? 0 : r.notice_days);
 function loading() { return h('div', { class: 'loading' }, h('div', { class: 'spin' }), '読み込み中…'); }
 function errorBox(e, retry) {
   return h('div', { class: 'errbox' }, h('p', {}, '⚠️ ' + errMsg(e)),
@@ -199,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-20'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-21'),
   ]);
 }
 
@@ -226,7 +230,7 @@ async function homeView() {
     const d = await api.home();
     if (my !== renderId) return;
     const rules = await api.recurring().catch(() => []);
-    const dueRules = rules.filter(r => r.is_active && String(r.next_due).slice(0, 10) <= ymd());
+    const dueRules = rules.filter(r => isNoticeTime(r, ymd())).sort((x, y) => String(x.next_due).localeCompare(String(y.next_due)));
     const pend = queued();
     const bd = DEMO ? 0 : daysSince(lastBackup());
     const payable = d.balances.reduce((s, b) => s + b.withi_owes, 0);
@@ -236,9 +240,9 @@ async function homeView() {
       pend.length ? h('section', { class: 'card', style: 'border-color:var(--yellow)' }, h('div', { class: 'cap' }, `⏳ 未送信の記録 ${pend.length}件`),
         h('p', { class: 'hint' }, '電波がなかったため、スマホに一時保存しています。つながると自動で送ります。'),
         h('button', { class: 'btn small', onclick: async () => { const r = await flushQueue(); toast(r.left ? `${r.sent}件送りました。残り${r.left}件` : '送りました', r.left ? 'err' : 'ok'); homeView(); } }, '今すぐ送る')) : null,
-      dueRules.length ? h('section', { class: 'card', style: 'border-color:var(--pink)' }, h('div', { class: 'cap' }, `🔁 定期費用の支払い日です(${dueRules.length}件)`),
-        ...dueRules.slice(0, 5).map(r => h('div', { class: 'brow' }, h('span', {}, `${r.name} ${yen(r.amount)}`, h('small', { style: 'display:block;color:var(--muted)' }, dshow(r.next_due) + (r.payer ? ' ・' + r.payer.name + 'が立替' : ''))),
-          h('span', {}, h('button', { class: 'undo', onclick: async () => { if (!state.by) { await pickBy(true); if (!state.by) return; } try { await api.postRecurring({ rule: r.id, date: String(r.next_due).slice(0, 10), skip: false, by: state.by }); getFx('−' + yen(r.amount), r.payer ? '立替を記録' : 'PAID'); homeView(); } catch (e) { toast(errMsg(e), 'err'); } } }, '記録する'),
+      dueRules.length ? h('section', { class: 'card', style: 'border-color:var(--pink)' }, h('div', { class: 'cap' }, `🔁 定期費用のお知らせ(${dueRules.length}件)`),
+        ...dueRules.slice(0, 5).map(r => h('div', { class: 'brow' }, h('span', {}, `${r.name} ${yen(r.amount)}`, h('small', { style: 'display:block;color:var(--muted)' }, dshow(r.next_due) + ' ・' + dueText(dayDiff(r.next_due, ymd())) + (r.payer ? ' ・' + r.payer.name + 'が立替' : ''))),
+          h('span', {}, h('button', { class: 'undo', onclick: async () => { if (!state.by) { await pickBy(true); if (!state.by) return; } try { await api.postRecurring({ rule: r.id, date: (String(r.next_due).slice(0, 10) > ymd() ? ymd() : String(r.next_due).slice(0, 10)), skip: false, by: state.by }); getFx('−' + yen(r.amount), r.payer ? '立替を記録' : 'PAID'); homeView(); } catch (e) { toast(errMsg(e), 'err'); } } }, '記録する'),
             h('button', { class: 'undo', onclick: async () => { if (await confirmBox('今回はとばす？', `${r.name} ${dshow(r.next_due)} 分は記録せず、次の回に進めます。`, 'とばす')) { try { await api.postRecurring({ rule: r.id, date: String(r.next_due).slice(0, 10), skip: true, by: state.by }); homeView(); } catch (e) { toast(errMsg(e), 'err'); } } } }, 'とばす'))))) : null,
       !DEMO && (bd == null || bd >= 30) ? h('a', { class: 'card', href: '#/backup', style: 'display:block' }, h('div', { class: 'cap' }, '💾 バックアップ'), h('p', { class: 'hint' }, bd == null ? 'まだバックアップを作っていません。タップして作る' : `最後のバックアップから${bd}日たっています。タップして作る`)) : null,
       h('section', { class: 'card fund' }, h('div', { class: 'cap' }, '💰 現在のWiθ資金'), h('div', { class: 'big' + (d.fund < 0 ? ' neg' : '') }, yen(d.fund))),
@@ -1080,12 +1084,15 @@ function manageView() {
 
 function ruleModal(rule, done) {
   const cats = state.cats.filter(c => c.group_name === 'general' && c.flow === 'expense' && c.name !== 'STS取り分');
-  const f = { cat: rule ? rule.category_id || '' : '', payer: rule ? rule.payer_id || '' : '', unit: rule ? rule.unit : 'month' };
+  const f = { cat: rule ? rule.category_id || '' : '', payer: rule ? rule.payer_id || '' : '', unit: rule ? rule.unit : 'month', notice: rule && rule.notice_days != null ? rule.notice_days : 7 };
+  let noticeTouched = !!rule;
   const name = h('input', { type: 'text', placeholder: '例: Spotify・ドメイン代', autocomplete: 'off', value: rule ? rule.name : '' });
   const amt = amountField(rule ? rule.amount : 0); const every = intField(rule ? rule.every_n : 1, '1');
   const due = h('input', { type: 'date', value: rule ? String(rule.next_due).slice(0, 10) : ymd() });
   const msg = h('p', { class: 'form-err', role: 'alert' });
   const payers = [{ id: '', label: 'Wiθ資金' }, ...state.people.filter(p => p.can_pay).map(p => ({ id: p.id, label: p.name }))];
+  const noticeChips = chips([0, 3, 7, 14, 30, 60].map(d => ({ id: d, label: d === 0 ? '当日' : d + '日前' })), f.notice, id => { f.notice = Number(id); noticeTouched = true; });
+  if (!rule && f.unit === 'month') f.notice = 7;
   const ok = h('button', { class: 'btn big', onclick: async () => {
     msg.textContent = ''; const n = numOrNull(every);
     if (!name.value.trim()) { msg.textContent = '名前を入れてください'; return; }
@@ -1093,14 +1100,14 @@ function ruleModal(rule, done) {
     if (!(n >= 1)) { msg.textContent = '間隔は1以上にしてください'; return; }
     if (!due.value) { msg.textContent = '次の支払日を入れてください'; return; }
     ok.disabled = true;
-    try { await api.saveRule(rule && rule.id, { name: name.value.trim(), every_n: n, unit: f.unit, next_due: due.value, amount: amt.get(), category_id: f.cat, payer_id: f.payer, is_active: true }); m.close(); toast('保存しました', 'ok'); done(); }
+    try { await api.saveRule(rule && rule.id, { name: name.value.trim(), every_n: n, unit: f.unit, next_due: due.value, amount: amt.get(), category_id: f.cat, payer_id: f.payer, is_active: true, notice_days: f.notice }); m.close(); toast('保存しました', 'ok'); done(); }
     catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
   } }, '保存する');
   const m = modal([h('h3', {}, rule ? '定期費用を編集' : '定期費用を追加'), field('名前', name),
     field('なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), f.cat, id => { f.cat = id; })),
     field('金額', amt.el),
-    field('くり返し', chips([{ id: 'month', label: 'ヶ月ごと' }, { id: 'year', label: '年ごと' }], f.unit, id => { f.unit = id; })), field('間隔(数)', every, '例: 毎月なら「ヶ月ごと」で1、半年ごとなら6'),
-    field('次の支払日', due), h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払う？'), chips(payers, f.payer, id => { f.payer = id; })), msg, ok]);
+    field('くり返し', chips([{ id: 'month', label: 'ヶ月ごと' }, { id: 'year', label: '年ごと' }], f.unit, id => { f.unit = id; if (!noticeTouched) { f.notice = id === 'year' ? 30 : 7; noticeChips.select(f.notice); } })), field('間隔(数)', every, '例: 毎月なら「ヶ月ごと」で1、半年ごとなら6'),
+    field('次の支払日', due), field('何日前からお知らせ？', noticeChips, '支払日の前から、ホームに出ます。年契約は30日前がおすすめ'), h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払う？'), chips(payers, f.payer, id => { f.payer = id; })), msg, ok]);
 }
 
 async function recurringView() {
@@ -1118,14 +1125,14 @@ async function recurringView() {
         h('span', { class: 'lico' }, '🔁'),
         h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, r.name),
           h('div', { class: 'lsub' }, [r.category && r.category.name, `${r.every_n}${r.unit === 'year' ? '年' : 'ヶ月'}ごと`, r.payer ? r.payer.name + 'が立替' : 'Wiθ資金'].filter(Boolean).join(' · ')),
-          h('div', { class: 'ltags' }, h('i', { class: 'tag ' + (over ? 'pay' : 'recv') }, '次: ' + dshow(due)), !r.is_active ? h('i', { class: 'tag dead' }, '停止中') : null)),
+          h('div', { class: 'ltags' }, h('i', { class: 'tag ' + (over ? 'pay' : 'recv') }, '次: ' + dshow(due) + (r.is_active ? '(' + dueText(dayDiff(due, today)) + ')' : '')), r.is_active ? h('i', { class: 'tag dead' }, (r.notice_days ? r.notice_days + '日前' : '当日') + 'にお知らせ') : null, !r.is_active ? h('i', { class: 'tag dead' }, '停止中') : null)),
         h('div', { class: 'lamt neg' }, yen(r.amount)),
         h('button', { class: 'undo', onclick: () => ruleModal(r, reload) }, '編集'),
         r.is_active ? h('button', { class: 'undo', onclick: async () => { if (await confirmBox('停止する？', `${r.name} を停止します。(これまでの記録は残ります)`, '停止する')) { try { await api.saveRule(r.id, { ...r, category_id: r.category_id, is_active: false }); reload(); } catch (e) { toast(errMsg(e), 'err'); } } } }, '停止')
           : h('button', { class: 'undo', onclick: async () => { try { await api.saveRule(r.id, { ...r, is_active: true }); reload(); } catch (e) { toast(errMsg(e), 'err'); } } }, '再開'));
     });
     body.replaceChildren(h('button', { class: 'btn big', style: 'width:100%', onclick: () => ruleModal(null, reload) }, '＋ 定期費用を追加'),
-      h('p', { class: 'hint' }, '支払日が来ると、ホームに「記録する／今回はとばす」が出ます。自動でお金は動かしません。'),
+      h('p', { class: 'hint' }, '設定した日数前から、ホームに「記録する／とばす」が出ます。アプリを開いたときに出るお知らせで、自動でお金は動きません。'),
       ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだ登録がありません。')]));
   } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, recurringView)); }
 }

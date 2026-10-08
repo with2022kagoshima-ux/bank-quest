@@ -193,7 +193,7 @@ const real = {
   // ---- 定期費用・テンプレート・バックアップ ----
   recurring: () => rest('recurring_rules?select=*,category:categories(name),payer:people(name)&order=next_due'),
   saveRule: (id, f) => rest(id ? `recurring_rules?id=eq.${id}` : 'recurring_rules', { method: id ? 'PATCH' : 'POST', prefer: 'return=minimal',
-    body: { name: f.name, every_n: f.every_n, unit: f.unit, next_due: f.next_due, amount: f.amount, category_id: f.category_id || null, payer_id: f.payer_id || null, is_active: f.is_active !== false } }),
+    body: { name: f.name, every_n: f.every_n, unit: f.unit, next_due: f.next_due, amount: f.amount, category_id: f.category_id || null, payer_id: f.payer_id || null, is_active: f.is_active !== false, notice_days: f.notice_days == null ? 14 : f.notice_days } }),
   postRecurring: o => rest('rpc/app_recurring_post', { method: 'POST', body: { p_rule: o.rule, p_date: o.date, p_skip: !!o.skip, p_by: o.by } }),
   templates: () => rest('quick_templates?select=*&is_active=eq.true&order=use_count.desc,label'),
   saveTemplate: (id, f) => rest(id ? `quick_templates?id=eq.${id}` : 'quick_templates', { method: id ? 'PATCH' : 'POST', prefer: 'return=minimal',
@@ -429,7 +429,7 @@ function makeDemo() {
     },
     async airLink(date, live) { await wait(); let c = 0; for (const b of AB) if (b.sale_date === date) { b.live_id = live || null; c++; } return c; },
     async recurring() { await wait(); return RR.map(r => ({ ...r, category: { name: (CATS.find(c => c.id === r.category_id) || {}).name }, payer: r.payer_id ? { name: (P.find(p => p.id === r.payer_id) || {}).name } : null })); },
-    async saveRule(id, f) { await wait(); const o = { name: f.name, every_n: f.every_n, unit: f.unit, next_due: f.next_due, amount: f.amount, category_id: f.category_id || null, payer_id: f.payer_id || null, is_active: f.is_active !== false }; if (id) Object.assign(RR.find(r => r.id === id), o); else RR.push({ id: 'r' + (++n), ...o }); },
+    async saveRule(id, f) { await wait(); const o = { name: f.name, every_n: f.every_n, unit: f.unit, next_due: f.next_due, amount: f.amount, category_id: f.category_id || null, payer_id: f.payer_id || null, is_active: f.is_active !== false, notice_days: f.notice_days == null ? 14 : f.notice_days }; if (id) Object.assign(RR.find(r => r.id === id), o); else RR.push({ id: 'r' + (++n), ...o }); },
     async postRecurring(o) {
       await wait(); const r = RR.find(x => x.id === o.rule); if (!o.skip) add({ occurred_on: o.date, kind: r.payer_id ? 'expense_advanced' : 'expense_fund', amount: r.amount, category_id: r.category_id, memo: r.name, payer_id: r.payer_id, source: 'recurring' });
       const d = new Date(r.next_due + 'T00:00:00'); if (r.unit === 'year') d.setFullYear(d.getFullYear() + r.every_n); else d.setMonth(d.getMonth() + r.every_n); r.next_due = ymd(d); return r.next_due;
