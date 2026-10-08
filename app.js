@@ -71,7 +71,7 @@ function amountField(init) {
   const fmt = () => { const d = input.value.replace(/[^0-9]/g, ''); input.value = d ? Number(d).toLocaleString('ja-JP') : ''; };
   input.addEventListener('input', fmt);
   if (init) { input.value = String(init); fmt(); }
-  return { el: h('div', { class: 'amount-wrap' }, h('span', { class: 'yen' }, '¥'), input), get: () => Number(input.value.replace(/[^0-9]/g, '')), set: v => { input.value = String(v); fmt(); } };
+  return { el: h('div', { class: 'amount-wrap' }, h('span', { class: 'yen' }, '¥'), input), raw: () => input.value, get: () => Number(input.value.replace(/[^0-9]/g, '')), set: v => { input.value = String(v); fmt(); } };
 }
 let fieldSeq = 0;
 // ボタン(チップ)を含む欄を <label> で包むと、どのボタンを押しても先頭のボタンが押されたことになる。
@@ -121,7 +121,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-6'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-7'),
   ]);
 }
 
@@ -512,7 +512,9 @@ async function saleView(channel) {
   const upSum = () => {
     const t = total(); const r = received.get();
     const fee = isBase ? t - r : 0;
-    sumBox.replaceChildren(h('div', { class: 'cap' }, '売上 合計'), h('b', {}, yen(t)),
+    const disc = !isBase && t > 0 && received.get() >= 0 && received.raw() !== '' ? t - r : 0;
+    sumBox.replaceChildren(h('div', { class: 'cap' }, isBase ? '売上 合計' : '定価の合計'), h('b', {}, yen(t)),
+      disc > 0 ? h('div', { class: 'hint' }, r === 0 ? 'タダ(0円)で渡す → 売上は記録せず、在庫だけ減らします' : `値引き ${yen(disc)}（${Math.round(disc / t * 100)}%）`) : null,
       isBase && t > 0 && r > 0 ? h('div', { class: fee < 0 ? 'form-err' : 'hint' }, fee < 0 ? '入金額が売上より大きくなっています' : `手数料 ${yen(fee)}（売上 − 入金）を自動で記録します`) : null);
     const sts = lines.filter(l => l.p.co_share).reduce((s, l) => s + l.qty * l.price * l.p.co_share, 0);
     note.textContent = sts > 0 ? `共同物販(STS)の取り分 ${yen(Math.round(sts))} を、STSへの未払いとして自動で記録します。` : '';
@@ -541,13 +543,14 @@ async function saleView(channel) {
     msg.textContent = '';
     if (!lines.length) { msg.textContent = '商品を1つ以上選んでください'; return; }
     const t = total(); const r = received.get();
-    if (!(r > 0)) { msg.textContent = isBase ? '入金された金額を入れてください' : '受け取った金額を入れてください'; return; }
+    if (isBase ? !(r > 0) : received.raw() === '') { msg.textContent = isBase ? '入金された金額を入れてください' : '受け取った金額を入れてください(タダなら0)'; return; }
+    if (!isBase && r > t) { msg.textContent = '受け取った額が定価の合計より大きくなっています。売価を直してください'; return; }
     if (isBase && r > t) { msg.textContent = '入金額が売上より大きくなっています。確認してください'; return; }
     if (!state.by) { await pickBy(true); if (!state.by) return; }
     submit.disabled = true;
     try {
       await api.merchSale({ channel, date: date.value, lines: lines.map(l => ({ variant_id: l.v.id, qty: l.qty, unit_price: l.price })), received: r, memo: memo.value.trim(), by: state.by });
-      getFx(`+${yen(isBase ? r : r)}`, 'MONEY GET!');
+      getFx(r > 0 ? `+${yen(r)}` : '0円', r > 0 ? 'MONEY GET!' : 'GIFT');
       location.hash = '#/home';
     } catch (e) { msg.textContent = errMsg(e); submit.disabled = false; }
   });
@@ -555,6 +558,12 @@ async function saleView(channel) {
     field('売った商品', h('div', {}, linesBox)), sumBox, note,
     field('商品を追加', q), list,
     field(isBase ? 'BASEから入金された金額' : '受け取った金額', received.el, isBase ? '売上との差が手数料になります' : '値引きしたときは、受け取った額に直してください'),
+    isBase ? null : h('div', { class: 'chips' },
+      h('button', { type: 'button', class: 'chip', onclick: () => { receivedTouched = false; redraw(); } }, '定価どおり'),
+      h('button', { type: 'button', class: 'chip', onclick: () => {
+        if (lines.some(l => l.v.cost == null)) { toast('原価が未設定の商品があります', 'err'); return; }
+        receivedTouched = true; received.set(lines.reduce((x, l) => x + l.qty * l.v.cost, 0)); upSum(); } }, '原価で売る'),
+      h('button', { type: 'button', class: 'chip', onclick: () => { receivedTouched = true; received.set(0); upSum(); } }, 'タダであげる')),
     field('内容(メモ)', memo), field('日付', date),
     h('a', { class: 'hint', href: '#/in?plain=1' }, '商品を選ばず金額だけ記録する'),
     msg, submit));

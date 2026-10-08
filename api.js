@@ -263,14 +263,15 @@ function makeDemo() {
       const vs = allV(); let sales = 0;
       if (!o.lines || !o.lines.length) throw new ApiError('商品を1つ以上選んでください');
       for (const l of o.lines) sales += l.qty * l.unit_price;
-      if (!(o.received > 0)) throw new ApiError('受け取った金額を入れてください');
+      if (!(o.received >= 0)) throw new ApiError('受け取った金額を入れてください');
+      if (o.channel === 'direct' && o.received > sales) throw new ApiError('受け取った金額が定価の合計より大きくなっています');
       if (o.channel === 'base' && o.received > sales) throw new ApiError(`入金額(${o.received}円)が売上(${sales}円)より大きくなっています。確認してください`);
       const oid = 'o' + (++n); const cat = nm => (CATS.find(c => c.name === nm) || {}).id;
       const label = o.lines.map(l => { const v = vs.find(x => x.id === l.variant_id); return `${v.product.name} ×${l.qty}`; }).join(' / ');
-      add({ occurred_on: o.date, kind: 'income', amount: o.channel === 'base' ? sales : o.received, category_id: cat(o.channel === 'base' ? 'BASE' : '物販(個別販売)'), memo: o.memo || label, merch_order_id: oid, source: o.channel });
+      if (o.channel === 'base' || o.received > 0) add({ occurred_on: o.date, kind: 'income', amount: o.channel === 'base' ? sales : o.received, category_id: cat(o.channel === 'base' ? 'BASE' : '物販(個別販売)'), memo: o.memo || label, merch_order_id: oid, source: o.channel });
       if (o.channel === 'base' && sales > o.received) add({ occurred_on: o.date, kind: 'expense_fund', amount: sales - o.received, category_id: cat('手数料'), memo: 'BASE手数料', merch_order_id: oid, source: 'base' });
       let sts = 0;
-      for (const l of o.lines) { const x = PR.flatMap(y => y.vars.map(v => ({ v, p: y.p }))).find(q => q.v.id === l.variant_id); x.v.stock -= l.qty; MV.unshift({ variant_id: l.variant_id, qty: -l.qty, reason: o.channel === 'base' ? 'sale_base' : 'sale_direct', occurred_on: o.date, memo: o.memo, order_id: oid }); if (x.p.co_share) sts += l.qty * l.unit_price * x.p.co_share; }
+      for (const l of o.lines) { const x = PR.flatMap(y => y.vars.map(v => ({ v, p: y.p }))).find(q => q.v.id === l.variant_id); x.v.stock -= l.qty; MV.unshift({ variant_id: l.variant_id, qty: -l.qty, reason: o.channel === 'base' ? 'sale_base' : 'sale_direct', occurred_on: o.date, memo: o.memo, order_id: oid }); if (x.p.co_share) sts += l.qty * l.unit_price * x.p.co_share * (o.channel === 'direct' && sales > 0 ? o.received / sales : 1); }
       if (sts > 0) add({ occurred_on: o.date, kind: 'expense_advanced', amount: Math.round(sts), category_id: cat('STS取り分'), memo: '共同物販の取り分 50%', payer_id: 'p5', merch_order_id: oid, source: o.channel });
       ORD.set(oid, o.lines);
       return oid;
