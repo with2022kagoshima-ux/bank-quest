@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=27';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=27';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=28';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=28';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 10/08-27'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 10/08-28'),
   ]);
 }
 
