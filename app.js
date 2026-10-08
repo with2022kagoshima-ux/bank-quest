@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=11';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=11';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=12';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=12';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -126,7 +126,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-11'),
+    h('p', { class: 'ver' }, 'Wiθ MONEY  Phase 3  ・ 版 10/08-12'),
   ]);
 }
 
@@ -326,7 +326,7 @@ async function historyView(limit = 80) {
       const [ico, label, sg] = KIND[r.kind] || ['•', r.kind, 0];
       const who = r.kind === 'expense_advanced' ? r.payer_name : r.party_name;
       const isRev = !!r.reverses_id;
-      const canRev = r.posting === 'posted' && !isRev && !r.reversed && !r.is_historical;
+      const canRev = r.posting === 'posted' && !isRev && !r.reversed;
       list.append(h('div', { class: 'lrow' + (r.reversed || isRev ? ' dead' : '') },
         h('span', { class: 'lico' }, ico),
         h('div', { class: 'lmain' },
@@ -339,7 +339,7 @@ async function historyView(limit = 80) {
             r.reversed ? h('i', { class: 'tag dead' }, '取消済み') : null, isRev ? h('i', { class: 'tag dead' }, '取消の行') : null)),
         h('div', { class: 'lamt ' + (sg > 0 ? 'pos' : sg < 0 ? 'neg' : '') }, (sg > 0 ? '+' : sg < 0 ? '−' : '') + yen(r.amount).replace('−', '')),
         canRev ? h('button', { class: 'undo', 'aria-label': 'この記録を取り消す', onclick: async () => {
-          const ok = await confirmBox('この記録を取り消す？', `${r.occurred_on.replaceAll('-', '/')}  ${r.memo || label}  ${yen(r.amount)}\n` + (r.merch_order_id ? 'この売上に関する記録(売上・手数料・STS取り分)と在庫が、まとめて元に戻ります。' : '元の行は消さず、打ち消しの行が追加されます。'), '取り消す');
+          const ok = await confirmBox('この記録を取り消す？', `${r.occurred_on.replaceAll('-', '/')}  ${r.memo || label}  ${yen(r.amount)}\n` + (r.merch_order_id ? 'この売上に関する記録(売上・手数料・STS取り分)と在庫が、まとめて元に戻ります。' : r.is_historical ? '過去データの取り消しです。元の行は消さず、打ち消しの行が追加されます。資金や貸借には影響しません(損益の集計だけが戻ります)。' : '元の行は消さず、打ち消しの行が追加されます。'), '取り消す');
           if (!ok) return;
           try { await api.reverse(r.id, state.by); toast('取り消しました', 'ok'); historyView(); } catch (e) { toast(errMsg(e), 'err'); }
         } }, '取消') : null));
@@ -703,7 +703,7 @@ async function liveView(id) {
   const body = h('div', {}, loading());
   $app.replaceChildren(shell('🎸 ライブ', body, '#/live-list'));
   try {
-    const [lives, entries, abs] = await Promise.all([api.lives(), api.liveEntries(id), api.airBaskets().catch(() => [])]);
+    const [lives, entries, abs, ast] = await Promise.all([api.lives(), api.liveEntries(id), api.airBaskets().catch(() => []), api.liveAirStatus(id).catch(() => null)]);
     if (my !== renderId) return;
     const l = lives.find(x => x.id === id);
     if (!l) { body.replaceChildren(h('p', { class: 'empty' }, 'ライブが見つかりません。')); return; }
@@ -735,17 +735,21 @@ async function liveView(id) {
       h('div', { class: 'trio' }, h('div', {}, h('small', {}, '収入'), h('b', { class: 'pos' }, yen(l.income))), h('div', {}, h('small', {}, '支出'), h('b', { class: 'neg' }, yen(l.expense))), h('div', {}, h('small', {}, '評価'), h('b', {}, ico + ' ' + lab))),
       l.memo ? h('p', { class: 'hint' }, l.memo) : null,
       conf ? null : h('button', { class: 'btn small', style: 'margin-top:10px', onclick: () => liveModal(l, reload) }, 'ライブの情報を編集'));
-    const myAb = abs.filter(b => b.live_id === id); const airSales = myAb.reduce((x, b) => x + (Number(b.total) || 0), 0);
-    const typed = entries.filter(r => r.kind === 'income' && !r.reverses_id && !r.reversed && /物販/.test(r.category_name || '')).reduce((x, r) => x + r.amount, 0);
+    const myAb = abs.filter(b => b.live_id === id); const airSales = ast ? Number(ast.sales) : myAb.reduce((x, b) => x + (Number(b.total) || 0), 0);
+    const typed = ast ? Number(ast.typed) : 0;
     const diff = airSales - typed;
-    const catMerch = state.cats.find(c => c.group_name === l.kind && c.flow === 'income' && c.name === '物販売上');
+    const stsTotal = ast ? Number(ast.sts_total) : 0; const stsDone = ast ? Number(ast.sts_recorded) : 0; const stsDiff = stsTotal - stsDone;
+    const canPost = ast && !conf && (diff > 0 || stsDiff > 0);
     const airCard = myAb.length ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '🧾 Airレジの物販'),
       h('div', { class: 'trio' }, h('div', {}, h('small', {}, '売上'), h('b', { class: 'pos' }, yen(airSales))), h('div', {}, h('small', {}, '会計'), h('b', {}, myAb.length + '件')), h('div', {}, h('small', {}, '客単価'), h('b', {}, yen(Math.round(airSales / myAb.length))))),
-      h('p', { class: 'hint' }, `入力済みの物販売上 ${yen(typed)} と Airレジ ${yen(airSales)} の差は ${yen(airSales - typed)} です。` + (diff === 0 ? '(一致)' : diff > 0 ? '(まだ記録していない分があります)' : '(入力のほうが多いので、数え違いがないか確認できます)')),
-      diff > 0 && catMerch && !conf ? h('button', { class: 'btn big in', style: 'width:100%', onclick: async () => {
+      h('p', { class: 'hint' }, `入力済みの物販売上 ${yen(typed)} と Airレジ ${yen(airSales)} の差は ${yen(diff)} です。` + (diff === 0 ? '(一致)' : diff > 0 ? '(まだ記録していない分があります)' : '(入力のほうが多いので、数え違いがないか確認できます)')),
+      stsTotal > 0 ? h('p', { class: 'hint' }, `共同物販(STS)の取り分は ${yen(stsTotal)}（売上の50%）。記録済み ${yen(stsDone)}。`) : null,
+      ast && Number(ast.unmapped) > 0 ? h('p', { class: 'hint' }, `商品と対応づいていない品目が ${ast.unmapped} 行あります。STS商品が含まれていると、取り分に入っていません。`) : null,
+      canPost ? h('button', { class: 'btn big in', style: 'width:100%', onclick: async () => {
         if (!state.by) { await pickBy(true); if (!state.by) return; }
-        try { await api.addEntry({ date: String(l.live_date).slice(0, 10), kind: 'income', amount: diff, category_id: catMerch.id, memo: `Airレジ物販(${myAb.length}会計)`, live_id: l.id, by: state.by }); getFx('+' + yen(diff), 'MONEY GET!'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
-      } }, `💰 物販売上 ${yen(diff)} を収入に記録する`) : (diff === 0 && myAb.length ? h('p', { class: 'hint' }, '✅ 物販売上は記録済みです。') : null)) : null;
+        try { const r = await api.liveAirPost(l.id, state.by); getFx('+' + yen(Number(r.income) || 0), 'MONEY GET!'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
+      } }, '💰 ' + [diff > 0 ? `物販売上 ${yen(diff)}` : '', stsDiff > 0 ? `STS取り分 ${yen(stsDiff)}` : ''].filter(Boolean).join(' と ') + ' を記録する')
+        : (diff === 0 && stsDiff <= 0 ? h('p', { class: 'hint' }, '✅ 物販売上は記録済みです。') : null)) : null;
     const upBox = h('div', {}); const upIn = h('input', { type: 'file', accept: '.csv,text/csv', style: 'display:none' });
     upIn.addEventListener('change', async () => {
       const f = upIn.files[0]; if (!f) return; upBox.replaceChildren(loading());

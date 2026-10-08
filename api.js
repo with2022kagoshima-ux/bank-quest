@@ -211,6 +211,8 @@ const real = {
     return out;
   },
   // ---- ライブ ----
+  liveAirStatus: id => rest('rpc/live_air_status', { method: 'POST', body: { p_live: id } }),
+  liveAirPost: (id, by) => rest('rpc/app_live_air_post', { method: 'POST', body: { p_live: id, p_by: by } }),
   async lives() {
     const [rows, vs, ls] = await Promise.all([
       rest('v_live_profit?select=*&order=live_date.desc'),
@@ -359,7 +361,7 @@ function makeDemo() {
         if (AB.some(x => x.sale_date === b.sale_date && x.txn_no === b.txn_no)) { skipped++; continue; }
         const total = Number(b.total) || b.lines.reduce((s, l) => s + l.price * l.qty, 0);
         const same = LV.filter(l => l.live_date === b.sale_date);
-        AB.push({ id: 'b' + (++n), sale_date: b.sale_date, txn_no: b.txn_no, total, item_count: Number(b.item_count) || null, live_id: same.length === 1 ? same[0].id : null, date_mismatch: false, staff_name: b.staff });
+        AB.push({ lines: b.lines, id: 'b' + (++n), sale_date: b.sale_date, txn_no: b.txn_no, total, item_count: Number(b.item_count) || null, live_id: same.length === 1 ? same[0].id : null, date_mismatch: false, staff_name: b.staff });
         nw++; if (same.length === 1) linked++;
         for (const l of b.lines) if (l.variant_id && b.sale_date > '2026-10-07') { const v = PR.flatMap(y => y.vars).find(x => x.id === l.variant_id); if (v) { v.stock -= l.qty; stock++; } }
       }
@@ -378,6 +380,22 @@ function makeDemo() {
     async removeTemplate(id) { await wait(); TP.find(t => t.id === id).is_active = false; },
     async useTemplate(id) { const t = TP.find(x => x.id === id); if (t) t.use_count++; },
     async exportAll() { await wait(); return { app: 'withi-money', demo: true, exported_at: new Date().toISOString(), tables: { ledger_entries: E } }; },
+    async liveAirStatus(id) {
+      await wait(); const bs = AB.filter(b => b.live_id === id); const sales = bs.reduce((s, b) => s + b.total, 0);
+      const inc = e => (e.live_id === id && !e.reverses_id && !E.some(x => x.reverses_id === e.id));
+      const typed = E.filter(e => inc(e) && e.kind === 'income' && (CATS.find(c => c.id === e.category_id) || {}).name === '物販売上').reduce((s, e) => s + e.amount, 0);
+      const stsRec = E.filter(e => inc(e) && e.kind === 'expense_advanced' && (CATS.find(c => c.id === e.category_id) || {}).name === 'STS取り分').reduce((s, e) => s + e.amount, 0);
+      let sts = 0, un = 0;
+      for (const b of bs) for (const l of b.lines || []) { const v = l.variant_id ? PR.flatMap(y => y.vars.map(x => ({ x, p: y.p }))).find(q => q.x.id === l.variant_id) : null; if (!v) un++; else if (v.p.co_share) sts += l.price * l.qty * v.p.co_share; }
+      return { sales, typed, sts_total: Math.round(sts), sts_recorded: stsRec, unmapped: un };
+    },
+    async liveAirPost(id) {
+      const st = await this.liveAirStatus(id); const lv = LV.find(l => l.id === id); const cat = (g, f, nm) => (CATS.find(c => c.group_name === g && c.flow === f && c.name === nm) || {}).id;
+      const inc = st.sales - st.typed; const sts = st.sts_total - st.sts_recorded;
+      if (inc > 0) add({ occurred_on: lv.live_date, kind: 'income', amount: inc, category_id: cat(lv.kind, 'income', '物販売上'), memo: 'Airレジ物販', live_id: id, source: 'live' });
+      if (sts > 0) add({ occurred_on: lv.live_date, kind: 'expense_advanced', amount: sts, category_id: cat('general', 'expense', 'STS取り分'), memo: '共同物販の取り分 50%', payer_id: 'p5', live_id: id, source: 'live' });
+      return { income: Math.max(inc, 0), sts: Math.max(sts, 0) };
+    },
     async liveRating() { return null; },
     async venues() { await wait(); return [...new Set(LV.map(l => l.venue).filter(Boolean))].map(n => ({ id: n, name: n, prefecture: '鹿児島' })); },
     async addLive(f) { await wait(); const id = 'L' + (++n); LV.push({ id, live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue: f.venue || '', memo: f.memo || '', status: 'draft', score: null }); return id; },
