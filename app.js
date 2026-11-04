@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=30';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=30';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=31';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=31';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/05-30'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/05-31'),
   ]);
 }
 
@@ -596,7 +596,7 @@ function addVariantModal(p, done) {
 
 const STOCK_MODES = { receive: '入荷(増やす)', count: '棚卸し(実数)', less: '減らす' };
 async function stockModal(p, v, done) {
-  let mode = 'receive';
+  let mode = 'receive'; let why = 'sold'; let money = 'off'; let up = 'in';
   const n = intField(null, '0'); const memo = h('input', { type: 'text', placeholder: '例: 追加納品 / 数え直し', autocomplete: 'off' });
   const date = h('input', { type: 'date', value: ymd() });
   const msg = h('p', { class: 'form-err', role: 'alert' });
@@ -605,7 +605,22 @@ async function stockModal(p, v, done) {
     const x = numOrNull(n); if (x == null) return null;
     return mode === 'receive' ? x : mode === 'less' ? -x : x - v.stock;
   };
-  const upd = () => { const d = calc(); eff.textContent = `いまの在庫 ${v.stock}点` + (d == null ? '' : ` → ${v.stock + d}点(${d >= 0 ? '+' : ''}${d})`); };
+  const sts = p.co_share ? h('p', { class: 'hint' }, '共同物販(STS)の商品です。売上のお金も記録すると、STSの取り分も一緒に記録されます。「分析だけ」では、STSの取り分は記録されません。') : null;
+  const moneyHint = h('p', { class: 'hint' }, '');
+  const whyChips = chips([{ id: 'sold', label: '物販で売れた' }, { id: 'lost', label: '紛失・破損・その他' }], why, id => { why = id; upd(); });
+  const moneyChips = chips([{ id: 'off', label: '分析だけ(お金は記録しない)' }, { id: 'on', label: '売上のお金も記録する' }], money, id => { money = id; upd(); });
+  const upChips = chips([{ id: 'in', label: '入荷' }, { id: 'undo', label: '売れたのを取り消す' }], up, id => { up = id; upd(); });
+  const decBox = h('div', { class: 'form', style: 'display:none' }, field('減る理由', whyChips), h('div', { class: 'moneybox' }, field('売上のお金', moneyChips), moneyHint, sts));
+  const incBox = h('div', { style: 'display:none' }, field('増える理由', upChips));
+  const upd = () => {
+    const d = calc();
+    eff.textContent = `いまの在庫 ${v.stock}点` + (d == null ? '' : ` → ${v.stock + d}点(${d >= 0 ? '+' : ''}${d})`);
+    const dec = d != null && d < 0;
+    decBox.style.display = dec ? '' : 'none';
+    decBox.querySelector('.moneybox').style.display = dec && why === 'sold' ? '' : 'none';
+    incBox.style.display = mode === 'receive' ? '' : 'none';
+    moneyHint.textContent = dec && why === 'sold' ? (money === 'on' ? `売値 ${v.price == null ? '未設定' : yen(v.price)} × ${-d}点 = ${v.price == null ? '—' : yen(v.price * -d)} を物販の売上として記録します。` : 'お金は記録せず、「売れた」として売れ筋・利益の分析にだけ入れます(売値と原価は、いまの設定で計算)。Airレジの取り込みや手入力で記録済みの分には使わないでください(二重になります)。') : '';
+  };
   n.addEventListener('input', upd);
   const ok = h('button', { class: 'btn big', onclick: async () => {
     msg.textContent = ''; const d = calc();
@@ -613,15 +628,26 @@ async function stockModal(p, v, done) {
     if (d === 0) { msg.textContent = '変わる数がありません'; return; }
     if (v.stock + d < 0) { msg.textContent = '在庫がマイナスになります。数を確認してください'; return; }
     if (!state.by) { await pickBy(true); if (!state.by) return; }
+    const sold = d < 0 && why === 'sold';
+    if (sold && money === 'on' && v.price == null) { msg.textContent = '売値が未設定です。先に売値を入れてください'; return; }
     ok.disabled = true;
-    try { await api.stockMove({ variant_id: v.id, qty: d, reason: mode === 'receive' ? 'receive' : 'adjust', date: date.value, memo: memo.value.trim() || (mode === 'count' ? '棚卸し' : ''), by: state.by }); m.close(); toast('在庫を更新しました', 'ok'); done(); }
+    try {
+      if (sold && money === 'on') {
+        await api.merchSale({ channel: 'direct', date: date.value, lines: [{ variant_id: v.id, qty: -d, unit_price: v.price }], received: v.price * -d, memo: memo.value.trim() || '在庫の画面から記録', by: state.by });
+      } else {
+        const reason = d > 0 ? (mode === 'receive' ? (up === 'undo' ? 'reversal' : 'receive') : 'adjust') : (sold ? 'sale_manual' : 'adjust');
+        const defMemo = reason === 'sale_manual' ? '売れた(分析のみ)' : reason === 'reversal' ? '売れたのを取り消し' : (mode === 'count' ? '棚卸し' : '');
+        await api.stockMove({ variant_id: v.id, qty: d, reason, date: date.value, memo: memo.value.trim() || defMemo, by: state.by });
+      }
+      m.close(); toast(sold ? '売れたことにして、在庫を更新しました' : '在庫を更新しました', 'ok'); done();
+    }
     catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
   } }, '記録する');
   const hist = h('div', { class: 'hint' }, '');
   api.stockHistory(v.id).then(rows => { if (rows.length) hist.textContent = '最近: ' + rows.slice(0, 4).map(r => `${r.occurred_on.slice(5).replace('-', '/')} ${r.qty > 0 ? '+' : ''}${r.qty}`).join(' / '); }).catch(() => {});
   const m = modal([h('h3', {}, p.name + '  ' + vLabel(v)),
     chips(Object.entries(STOCK_MODES).map(([id, label]) => ({ id, label })), mode, id => { mode = id; upd(); }),
-    eff, field(mode === 'count' ? '数えた数' : '数', n), field('メモ', memo), field('日付', date), hist, msg, ok]);
+    eff, field(mode === 'count' ? '数えた数' : '数', n), incBox, decBox, field('メモ', memo), field('日付', date), hist, msg, ok]);
   upd();
 }
 
