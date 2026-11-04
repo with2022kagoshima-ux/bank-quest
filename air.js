@@ -1,5 +1,5 @@
 // Airレジ 月次CSVの読み込み(画面側で解析する。サーバーには整えた結果だけ送る)
-import { normName } from './api.js?v=28';
+import { normName } from './api.js?v=30';
 
 export function decodeCsv(buf) {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(buf).replace(/^﻿/, ''); }
@@ -61,4 +61,19 @@ export function autoMatch(l, products) {
   if (p.air_type2_role) want[p.air_type2_role] = nn(l.type2);
   const hit = vs.filter(v => nn(v.size) === want.size && nn(v.color) === want.color);
   return hit.length === 1 ? hit[0].id : null;
+}
+
+
+// 取引Noの中の時刻(YYYYMMDDHHMMSS)。読めなければ null
+export function txnStamp(no) {
+  const m = /^\d{4}(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(String(no || ''));
+  return m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}` : null;
+}
+export const nextDate = d => { const t = new Date(d + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 1); return t.toISOString().slice(0, 10); };
+// ライブ当日の翌日0時〜(untilHour)時の会計か(日またぎ)
+export function isOvernight(b, date, untilHour = 6) {
+  if (b.sale_date !== nextDate(date)) return false;
+  const st = b.txn_stamp ? String(b.txn_stamp).replace(' ', 'T').slice(0, 19) : txnStamp(b.txn_no);
+  if (!st) return false;
+  return st >= date + 'T00:00:00' && st < nextDate(date) + 'T' + String(untilHour).padStart(2, '0') + ':00:00';
 }

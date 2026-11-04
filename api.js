@@ -186,9 +186,11 @@ const real = {
   merchSale: o => rest('rpc/app_merch_sale', { method: 'POST', body: { p_channel: o.channel, p_date: o.date, p_lines: o.lines, p_received: o.received, p_memo: o.memo || null, p_customer: o.customer || null, p_by: o.by } }),
   // ---- Airレジ ----
   async airMap() { const r = await rest('air_item_map?select=menu_norm,type1_norm,type2_norm,variant_id'); return r; },
-  airBaskets: () => rest('air_baskets?select=id,sale_date,txn_no,total,item_count,live_id,date_mismatch,staff_name&order=sale_date.desc,txn_no.desc&limit=2000'),
+  airBaskets: () => rest('air_baskets?select=id,sale_date,txn_no,txn_stamp,total,item_count,live_id,date_mismatch,staff_name&order=sale_date.desc,txn_no.desc&limit=2000'),
   airImports: () => rest('air_imports?select=file_name,target_month,baskets_new,imported_at&order=imported_at.desc&limit=12'),
   airImport: o => rest('rpc/app_air_import', { method: 'POST', body: { p_file_name: o.file_name, p_hash: o.hash, p_month: o.month, p_baskets: o.baskets, p_map: o.map, p_by: o.by } }),
+  airLinkOvernight: (live, by) => rest('rpc/app_air_link_overnight', { method: 'POST', body: { p_live: live, p_by: by } }),
+  liveMerchSale: o => rest('rpc/app_live_merch_sale', { method: 'POST', body: { p_live: o.live, p_date: o.date, p_lines: o.lines, p_received: o.received, p_memo: o.memo || null, p_by: o.by } }),
   airLink: (date, live, by) => rest('rpc/app_air_link', { method: 'POST', body: { p_date: date, p_live: live || null, p_by: by } }),
   // ---- 定期費用・テンプレート・バックアップ ----
   recurring: () => rest('recurring_rules?select=*,category:categories(name),payer:people(name)&order=next_due'),
@@ -420,12 +422,26 @@ function makeDemo() {
         if (AB.some(x => x.sale_date === b.sale_date && x.txn_no === b.txn_no)) { skipped++; continue; }
         const total = Number(b.total) || b.lines.reduce((s, l) => s + l.price * l.qty, 0);
         const same = LV.filter(l => l.live_date === b.sale_date);
-        AB.push({ lines: b.lines, id: 'b' + (++n), sale_date: b.sale_date, txn_no: b.txn_no, total, item_count: Number(b.item_count) || null, live_id: same.length === 1 ? same[0].id : null, date_mismatch: false, staff_name: b.staff });
+        AB.push({ lines: b.lines, id: 'b' + (++n), sale_date: b.sale_date, txn_no: b.txn_no, total, item_count: Number(b.item_count) || null, live_id: same.length === 1 ? same[0].id : null, txn_stamp: (m => m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}` : null)(/^\d{4}(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(String(b.txn_no || ''))), date_mismatch: false, staff_name: b.staff });
         nw++; if (same.length === 1) linked++;
         for (const l of b.lines) if (l.variant_id && b.sale_date > '2026-10-07') { const v = PR.flatMap(y => y.vars).find(x => x.id === l.variant_id); if (v) { v.stock -= l.qty; stock++; } }
       }
       AI.unshift({ file_name: o.file_name, target_month: o.month, baskets_new: nw, hash: o.hash, imported_at: new Date().toISOString() });
       return { new: nw, skipped, lines: 0, stock_lines: stock, linked };
+    },
+    async airLinkOvernight(live) { await wait(); const lv = LV.find(l => l.id === live); const nd = new Date(lv.live_date + 'T00:00:00Z'); nd.setUTCDate(nd.getUTCDate() + 1); const nds = nd.toISOString().slice(0, 10); let c = 0; for (const b of AB) { const st = b.txn_stamp; if (b.sale_date === nds && !b.live_id && st && st >= lv.live_date + 'T00:00:00' && st < nds + 'T06:00:00') { b.live_id = live; c++; } } return c; },
+    async liveMerchSale(o) {
+      await wait(); const lv = LV.find(l => l.id === o.live); if (lv.status === 'confirmed') throw new ApiError('このライブは確定済みです');
+      const vs = allV(); let sales = 0; if (!o.lines || !o.lines.length) throw new ApiError('商品を1つ以上選んでください');
+      for (const l of o.lines) sales += l.qty * l.unit_price;
+      if (o.received > sales) throw new ApiError('受け取った金額が定価の合計より大きくなっています');
+      const oid = 'o' + (++n); const cat = (g, f, nm) => (CATS.find(c => c.group_name === g && c.flow === f && c.name === nm) || {}).id;
+      const label = o.lines.map(l => { const v = vs.find(x => x.id === l.variant_id); return `${v.product.name} ×${l.qty}`; }).join(' / ');
+      if (o.received > 0) add({ occurred_on: o.date, kind: 'income', amount: o.received, category_id: cat(lv.kind, 'income', '物販売上'), memo: o.memo || label, live_id: o.live, merch_order_id: oid, source: 'live' });
+      let sts = 0;
+      for (const l of o.lines) { const x = PR.flatMap(y => y.vars.map(v => ({ v, p: y.p }))).find(q => q.v.id === l.variant_id); x.v.stock -= l.qty; MV.unshift({ variant_id: l.variant_id, qty: -l.qty, reason: 'sale_direct', occurred_on: o.date, memo: o.memo, order_id: oid }); if (x.p.co_share) sts += l.qty * l.unit_price * x.p.co_share; }
+      if (sts > 0) add({ occurred_on: o.date, kind: 'expense_advanced', amount: Math.round(sts * (sales > 0 ? o.received / sales : 1)), category_id: cat('general', 'expense', 'STS取り分'), memo: '共同物販の取り分 50%', payer_id: 'p5', live_id: o.live, merch_order_id: oid, source: 'live' });
+      ORD.set(oid, o.lines); return oid;
     },
     async airLink(date, live) { await wait(); let c = 0; for (const b of AB) if (b.sale_date === date) { b.live_id = live || null; c++; } return c; },
     async recurring() { await wait(); return RR.map(r => ({ ...r, category: { name: (CATS.find(c => c.id === r.category_id) || {}).name }, payer: r.payer_id ? { name: (P.find(p => p.id === r.payer_id) || {}).name } : null })); },

@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=29';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch } from './air.js?v=29';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=30';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=30';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 10/26-29'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/05-30'),
   ]);
 }
 
@@ -627,19 +627,23 @@ async function stockModal(p, v, done) {
 
 
 // ---------- 物販の売上(BASE・個別販売) ----------
-async function saleView(channel) {
+async function saleView(channel, liveId) {
   const my = ++renderId;
   const isBase = channel === 'base';
+  const isLive = channel === 'live';
   const body = h('div', {}, loading());
-  $app.replaceChildren(shell(isBase ? '🛒 BASEの売上' : '🤝 物販(個別販売)', body, '#/in'));
-  let products;
-  try { products = (await api.products()).filter(p => p.is_active); } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, () => saleView(channel))); return; }
+  $app.replaceChildren(shell(isBase ? '🛒 BASEの売上' : isLive ? '📦 ライブの物販売上' : '🤝 物販(個別販売)', body, isLive ? '#/live?id=' + liveId : '#/in'));
+  let products; let live = null;
+  try {
+    products = (await api.products()).filter(p => p.is_active);
+    if (isLive) { live = (await api.lives()).find(x => x.id === liveId); if (!live) throw new ApiError('ライブが見つかりません'); }
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, () => saleView(channel, liveId))); return; }
   if (my !== renderId) return;
   const lines = []; // {v, p, qty, price}
   let receivedTouched = false;
   const received = amountField();
-  const memo = h('input', { type: 'text', placeholder: isBase ? '例: 10/5入金分' : '例: ジミーさん 手売り', autocomplete: 'off' });
-  const date = h('input', { type: 'date', value: ymd() });
+  const memo = h('input', { type: 'text', placeholder: isBase ? '例: 10/5入金分' : isLive ? '例: 物販 手売り分' : '例: ジミーさん 手売り', autocomplete: 'off' });
+  const date = h('input', { type: 'date', value: isLive ? String(live.live_date).slice(0, 10) : ymd() });
   const msg = h('p', { class: 'form-err', role: 'alert' });
   const linesBox = h('div', {}); const sumBox = h('div', { class: 'card mini' });
   const total = () => lines.reduce((s, l) => s + l.qty * l.price, 0);
@@ -704,12 +708,15 @@ async function saleView(channel) {
     if (!state.by) { await pickBy(true); if (!state.by) return; }
     submit.disabled = true;
     try {
-      await api.merchSale({ channel, date: date.value, lines: lines.map(l => ({ variant_id: l.v.id, qty: l.qty, unit_price: l.price })), received: r, memo: memo.value.trim(), by: state.by });
+      const ln = lines.map(l => ({ variant_id: l.v.id, qty: l.qty, unit_price: l.price }));
+      if (isLive) await api.liveMerchSale({ live: liveId, date: date.value, lines: ln, received: r, memo: memo.value.trim(), by: state.by });
+      else await api.merchSale({ channel, date: date.value, lines: ln, received: r, memo: memo.value.trim(), by: state.by });
       getFx(r > 0 ? `+${yen(r)}` : '0円', r > 0 ? 'MONEY GET!' : 'GIFT');
-      location.hash = '#/home';
+      location.hash = isLive ? '#/live?id=' + liveId : '#/home';
     } catch (e) { msg.textContent = errMsg(e); submit.disabled = false; }
   });
   body.replaceChildren(h('div', { class: 'form' },
+    isLive ? h('p', { class: 'hint' }, `${live.event_name}(${dshow(live.live_date)})の物販です。Airレジの売上CSVから取り込む分は、ここで入れると二重になります。Airレジを使わなかった分だけ入れてください。`) : null,
     field('売った商品', h('div', {}, linesBox)), sumBox, note,
     field('商品を追加', q), list,
     field(isBase ? 'BASEから入金された金額' : '受け取った金額', received.el, isBase ? '売上との差が手数料になります' : '値引きしたときは、受け取った額に直してください'),
@@ -720,7 +727,7 @@ async function saleView(channel) {
         receivedTouched = true; received.set(lines.reduce((x, l) => x + l.qty * l.v.cost, 0)); upSum(); } }, '原価で売る'),
       h('button', { type: 'button', class: 'chip', onclick: () => { receivedTouched = true; received.set(0); upSum(); } }, 'タダであげる')),
     field('内容(メモ)', memo), field('日付', date),
-    h('a', { class: 'hint', href: '#/in?plain=1' }, '商品を選ばず金額だけ記録する'),
+    isLive ? h('a', { class: 'hint', href: '#/live?id=' + liveId }, '商品を選ばず金額だけ記録するときは、ライブの「収入を追加」から') : h('a', { class: 'hint', href: '#/in?plain=1' }, '商品を選ばず金額だけ記録する'),
     msg, submit));
   redraw();
 }
@@ -791,6 +798,9 @@ function liveEntryModal(live, isIn, done, entry) {
   const payers = [{ id: '', label: 'Wiθ資金' }, ...state.people.filter(p => p.can_pay).map(p => ({ id: p.id, label: p.name }))];
   const hint = h('span', { class: 'hint' }, f.payer ? `立替: 資金は減らず、${nameOf(f.payer)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。');
   const rcp = isIn || entry ? null : receiptPicker();
+  const prodBox = isIn && !entry ? h('div', { class: 'card mini', style: 'display:none' },
+    h('p', { class: 'hint' }, '商品を選んで記録すると、在庫・STS取り分・売上がまとめて記録されます(金額だけの入力なら、下の欄に入れてください)。'),
+    h('a', { class: 'btn big in', style: 'display:block;text-align:center;text-decoration:none', href: '#/live-sale?id=' + live.id, onclick: () => { try { m.close(); } catch {} } }, '📦 商品を選んで記録する')) : null;
   const ok = h('button', { class: 'btn big ' + (isIn ? 'in' : 'out'), onclick: async () => {
     msg.textContent = ''; const a = amt.get();
     if (!f.cat) { msg.textContent = 'カテゴリを選んでください'; return; }
@@ -810,7 +820,8 @@ function liveEntryModal(live, isIn, done, entry) {
   } }, '記録する');
   const m = modal([h('h3', {}, (entry ? '✏️ 修正: ' : '') + (isIn ? '💰 収入 ' : '💸 支出 ') + '— ' + live.event_name),
     entry ? h('p', { class: 'muted' }, '元の記録は「取消済み」として残り、直した内容が新しく追加されます。') : null,
-    field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), f.cat, id => { f.cat = id; })),
+    field(isIn ? 'どこから？' : 'なにに？', chips(cats.map(c => ({ id: c.id, label: c.name })), f.cat, id => { f.cat = id; if (prodBox) prodBox.style.display = isIn && !entry && (cats.find(c => c.id === id) || {}).name === '物販売上' ? '' : 'none'; })),
+    prodBox,
     field('金額', amt.el), field('内容', memo), field('日付', date),
     isIn ? null : h('div', { class: 'field' }, h('span', { class: 'field-label' }, '誰が払った？'), chips(payers, f.payer, id => { f.payer = id; hint.textContent = id ? `立替: 資金は減らず、${nameOf(id)}への未払いになります。` : 'Wiθの資金から支払います。資金が減ります。'; }), hint),
     rcp ? rcp.el : null,
@@ -873,6 +884,14 @@ async function liveView(id) {
         try { const r = await api.liveAirPost(l.id, state.by); getFx('+' + yen(Number(r.income) || 0), 'MONEY GET!'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
       } }, '💰 ' + [diff > 0 ? `物販売上 ${yen(diff)}` : '', stsDiff > 0 ? `STS取り分 ${yen(stsDiff)}` : ''].filter(Boolean).join(' と ') + ' を記録する')
         : (diff === 0 && stsDiff <= 0 ? h('p', { class: 'hint' }, '✅ 物販売上は記録済みです。') : null)) : null;
+    const ld = String(l.live_date).slice(0, 10);
+    const ovnAb = abs.filter(b => !b.live_id && isOvernight(b, ld));
+    const ovnCard = !conf && ovnAb.length ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '🌙 日またぎの会計'),
+      h('p', { class: 'hint' }, `翌日の0〜6時に会計された ${ovnAb.length} 件(${yen(ovnAb.reduce((x, b) => x + (Number(b.total) || 0), 0))})が、まだどのライブにもひも付いていません。このライブの深夜の売れ分なら、ひも付けると売上・在庫・STS取り分に反映できます。`),
+      h('button', { class: 'btn big in', style: 'width:100%', onclick: async () => {
+        if (!state.by) { await pickBy(true); if (!state.by) return; }
+        try { const c = await api.airLinkOvernight(l.id, state.by); toast(`${c}件をこのライブにひも付けました`, 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
+      } }, 'このライブにひも付ける')) : null;
     const upBox = h('div', {}); const upIn = h('input', { type: 'file', accept: '.csv,text/csv', style: 'display:none' });
     upIn.addEventListener('change', async () => {
       const f = upIn.files[0]; if (!f) return; upBox.replaceChildren(loading());
@@ -880,14 +899,14 @@ async function liveView(id) {
       upIn.value = '';
     });
     const upCard = conf ? null : h('section', { class: 'card' }, h('div', { class: 'cap' }, '📥 Airレジの売上CSV'),
-      h('p', { class: 'hint' }, `このライブの日(${dshow(l.live_date)})の物販売上を、AirレジのCSVから読み込みます。`),
+      h('p', { class: 'hint' }, `このライブの日(${dshow(l.live_date)})の物販売上を、AirレジのCSVから読み込みます。日をまたいだ深夜0〜6時の会計も、一緒に取り込めます。`),
       h('button', { class: 'btn' + (myAb.length ? ' ghost' : ' big'), style: 'width:100%', onclick: () => upIn.click() }, myAb.length ? '📂 CSVを選び直す' : '📂 CSVを選んで物販売上を出す'), upIn, upBox);
     const unsettled = entries.some(r => r.kind === 'expense_advanced' && !r.reversed && !r.reverses_id);
     body.replaceChildren(head,
       conf ? h('p', { class: 'hint' }, '確定済みです。記録を足したり取り消したりするには、先に「確定を解除」してください。') : h('div', { class: 'duo' },
         h('button', { class: 'btn in', onclick: () => liveEntryModal(l, true, reload) }, '💰 収入を追加'),
         h('button', { class: 'btn out', onclick: () => liveEntryModal(l, false, reload) }, '💸 支出を追加')),
-      upCard, airCard,
+      upCard, ovnCard, airCard,
       h('div', { class: 'cap sec' }, 'このライブのお金'),
       ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだ記録がありません。')]),
       unsettled ? h('p', { class: 'hint' }, '立替の返済は、ホームの「立替を返す・相殺」から行います。') : null,
@@ -953,11 +972,14 @@ async function airPreview(file, box, existing, reload, opt = {}) {
   const buf = await file.arrayBuffer();
   const parsed = parseAir(decodeCsv(buf));
   let hash = await sha256(buf);
-  let others = 0;
-  if (opt.date) { // ライブから取り込むときは、そのライブの日の会計だけを使う
-    others = parsed.baskets.filter(b => b.sale_date !== opt.date).length;
-    parsed.baskets = parsed.baskets.filter(b => b.sale_date === opt.date);
-    hash += ':' + opt.date;
+  let others = 0; let ovn = 0;
+  const useOvn = opt.overnight !== false;
+  if (opt.date) { // ライブから取り込むときは、そのライブの日の会計(と、日またぎの深夜分)だけを使う
+    ovn = parsed.baskets.filter(b => isOvernight(b, opt.date)).length;
+    const keep = b => b.sale_date === opt.date || (useOvn && isOvernight(b, opt.date));
+    others = parsed.baskets.filter(b => !keep(b) && !isOvernight(b, opt.date)).length;
+    parsed.baskets = parsed.baskets.filter(keep);
+    hash += ':' + opt.date + (useOvn && ovn ? ':n' : '');
     if (!parsed.baskets.length) { box.replaceChildren(h('p', { class: 'form-err' }, `このファイルに ${dshow(opt.date)} の会計がありません。ライブの日付とファイルを確認してください。`)); return; }
   }
   const [products, saved] = await Promise.all([api.products(), api.airMap()]);
@@ -989,7 +1011,7 @@ async function airPreview(file, box, existing, reload, opt = {}) {
       const baskets = parsed.baskets.map(b => ({ ...b, lines: b.lines.map(l => ({ ...l, variant_id: (items.get(keyOf(l)) || {}).vid || null })) }));
       const map = [...items.values()].filter(it => it.vid).map(it => ({ menu_norm: keyOf(it.l).split('|')[0], type1_norm: keyOf(it.l).split('|')[1], type2_norm: keyOf(it.l).split('|')[2], variant_id: it.vid }));
       const r = await api.airImport({ file_name: file.name, hash, month: parsed.month, baskets, map, by: state.by });
-      if (opt.liveId) await api.airLink(opt.date, opt.liveId, state.by);
+      if (opt.liveId) { await api.airLink(opt.date, opt.liveId, state.by); if (useOvn && ovn) await api.airLinkOvernight(opt.liveId, state.by); }
       toast(`${r.new}会計を取り込みました(在庫を動かした行 ${r.stock_lines})`, 'ok'); reload();
     } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
   } }, '取り込む');
@@ -999,9 +1021,10 @@ async function airPreview(file, box, existing, reload, opt = {}) {
     h('div', { class: 'trio' }, h('div', {}, h('small', {}, '新しい会計'), h('b', {}, fresh.length)), h('div', {}, h('small', {}, '取り込み済み'), h('b', {}, parsed.baskets.length - fresh.length)), h('div', {}, h('small', {}, '売上'), h('b', { class: 'pos' }, yen(total)))),
     unm ? h('p', { class: 'hint' }, `商品マスタと照合できなかった品目が ${unm} 件あります。選ばなければ、売上の記録だけで在庫は動きません。`) : h('p', { class: 'hint' }, 'すべての品目を商品に対応づけました。'),
     h('p', { class: 'hint' }, '同じ種類の品目は1回選べば、次回から覚えます。'),
+    ovn ? h('label', { class: 'hint', style: 'display:flex;gap:8px;align-items:center' }, h('input', { type: 'checkbox', checked: useOvn, onchange: ev => airPreview(file, box, existing, reload, { ...opt, overnight: ev.target.checked }) }), `日またぎの会計(翌日0〜6時) ${ovn} 件も、このライブの分として取り込む`) : null,
     others ? h('p', { class: 'hint' }, `ファイルには他の日の会計も ${others} 件ありますが、このライブの日の分だけを使います。`) : null,
     ...itemRows, msg, fresh.length ? ok : h('div', {}, h('p', { class: 'hint' }, 'この日の会計は、すべて取り込み済みです。'),
-      opt.liveId ? h('button', { class: 'btn', onclick: async () => { try { await api.airLink(opt.date, opt.liveId, state.by); toast('このライブにひも付けました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); } } }, 'この日の会計をこのライブにひも付ける') : null)));
+      opt.liveId ? h('button', { class: 'btn', onclick: async () => { try { await api.airLink(opt.date, opt.liveId, state.by); if (useOvn && ovn) await api.airLinkOvernight(opt.liveId, state.by); toast('このライブにひも付けました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); } } }, 'この日の会計をこのライブにひも付ける') : null)));
 }
 
 // ---------- 管理: 定期費用・テンプレート・バックアップ ----------
@@ -1253,6 +1276,7 @@ async function route() {
   if (path === '/air') return airView();
   if (path === '/live-list') return liveListView();
   if (path === '/live') return liveView(q.get('id'));
+  if (path === '/live-sale') return saleView('live', q.get('id'));
   if (path === '/merch') return merchView();
   if (path === '/product') return productView(q.get('id'));
   return homeView();
