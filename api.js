@@ -165,12 +165,19 @@ const real = {
       reversed: reversed.has(r.id), adv: advMap.get(r.id) || null,
     }));
   },
+  async claims() {
+    const sel = 'select=*,category:categories(name),payer:people!ledger_entries_payer_id_fkey(name),live:lives(event_name,live_date)';
+    const rows = await rest(`ledger_entries?${sel}&posting=eq.draft&order=occurred_on.asc,created_at.asc`);
+    return rows.map(r => ({ ...r, amount: Number(r.amount), category_name: r.category && r.category.name, payer_name: r.payer && r.payer.name, live_name: r.live && r.live.event_name }));
+  },
+  async approveClaim(id) { await rest(`ledger_entries?id=eq.${id}&posting=eq.draft`, { method: 'PATCH', prefer: 'return=minimal', body: { posting: 'posted' } }); },
+  async rejectClaim(id) { await rest(`ledger_entries?id=eq.${id}&posting=eq.draft`, { method: 'DELETE', prefer: 'return=minimal' }); },
   async addEntry(e) {
     const body = {
       id: crypto.randomUUID(),
       occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id || null,
       memo: e.memo || null, payer_id: e.payer_id || null, party_id: e.party_id || null,
-      source: e.live_id ? 'live' : 'manual', live_id: e.live_id || null, posting: 'posted', created_by: e.by,
+      source: e.live_id ? 'live' : 'manual', live_id: e.live_id || null, posting: e.posting || 'posted', created_by: e.by,
     };
     try { await rest('ledger_entries', { method: 'POST', prefer: 'return=minimal', body }); return { queued: false, id: body.id }; }
     catch (err) {
@@ -395,7 +402,10 @@ function makeDemo() {
         reversed: E.some(x => x.reverses_id === e.id), adv: av.get(e.id) || null,
       }));
     },
-    async addEntry(e) { await wait(); const r0 = add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id, live_id: e.live_id || null, source: e.live_id ? 'live' : 'manual' }); return { queued: false, id: r0.id }; },
+    async claims() { await wait(); const nm = pid => (P.find(p => p.id === pid) || {}).name; return E.filter(e => e.posting === 'draft').map(e => ({ ...e, category_name: (CATS.find(c => c.id === e.category_id) || {}).name, payer_name: nm(e.payer_id), live_name: e.live_id ? ((LV.find(l => l.id === e.live_id) || {}).event_name || '') : '' })); },
+    async approveClaim(id) { await wait(); const e = E.find(x => x.id === id); if (e) e.posting = 'posted'; },
+    async rejectClaim(id) { await wait(); const i = E.findIndex(x => x.id === id && x.posting === 'draft'); if (i >= 0) E.splice(i, 1); },
+    async addEntry(e) { await wait(); const r0 = add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id, live_id: e.live_id || null, source: e.live_id ? 'live' : 'manual', posting: e.posting || 'posted' }); return { queued: false, id: r0.id }; },
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
     async offset(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable || e.amount > b.recv) throw new ApiError(`相殺できるのは、未払い残(${b.payable}円)と借入残(${b.recv}円)の小さい方までです`); const r = add({ occurred_on: e.date, kind: 'offset', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
 
