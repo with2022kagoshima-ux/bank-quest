@@ -4,7 +4,7 @@
 // 設定するシークレット:
 //   BASE_CLIENT_ID / BASE_CLIENT_SECRET … BASE Developers で発行されたもの
 //   APP_URL                            … https://with2022kagoshima-ux.github.io/bank-quest/
-// (SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY は自動で入る)
+// (SUPABASE_URL と APIキーは自動で入る)
 //
 // デプロイ: supabase functions deploy base-sync --no-verify-jwt
 //   (BASEから戻ってくる callback はログイン情報を持たないため。POST はこの中で本人確認する)
@@ -12,8 +12,10 @@
 import { computeLines, suggest, type BaseItem, type MapRow } from './logic.ts';
 
 const SB_URL = Deno.env.get('SUPABASE_URL')!;
-const ANON = Deno.env.get('SUPABASE_ANON_KEY')!;
-const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+// 新しいAPIキー(sb_publishable_ / sb_secret_)を優先し、無ければ旧キーを使う
+const keyOf = (env: string) => { try { const j = JSON.parse(Deno.env.get(env) || '{}'); return j.default || Object.values(j)[0] || ''; } catch { return ''; } };
+const ANON = keyOf('SUPABASE_PUBLISHABLE_KEYS') || Deno.env.get('SUPABASE_ANON_KEY')!;
+const SERVICE = keyOf('SUPABASE_SECRET_KEYS') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const CLIENT_ID = Deno.env.get('BASE_CLIENT_ID') || '';
 const CLIENT_SECRET = Deno.env.get('BASE_CLIENT_SECRET') || '';
 const APP_URL = (Deno.env.get('APP_URL') || 'https://with2022kagoshima-ux.github.io/bank-quest/').replace(/\/?$/, '/');
@@ -34,7 +36,8 @@ const json = (body: unknown, status = 200) =>
 
 // ---------- Supabase (service role で直接 REST を叩く) ----------
 async function db(path: string, init: { method?: string; body?: unknown; prefer?: string } = {}) {
-  const headers: Record<string, string> = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, 'Content-Type': 'application/json' };
+  const headers: Record<string, string> = { apikey: SERVICE, 'Content-Type': 'application/json' };
+  if (!SERVICE.startsWith('sb_')) headers.Authorization = `Bearer ${SERVICE}`; // 旧キー(JWT)のときだけ
   if (init.prefer) headers.Prefer = init.prefer;
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { method: init.method || 'GET', headers, body: init.body === undefined ? undefined : JSON.stringify(init.body) });
   const t = await r.text();

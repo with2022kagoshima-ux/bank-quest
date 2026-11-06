@@ -10,8 +10,10 @@
 -- ---------------------------------------------------------------------
 do $$
 begin
-  perform 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_movements' and column_name = 'order_id';
-  if not found then raise exception 'stock_movements.order_id がありません。Claudeに伝えてください'; end if;
+  perform 1 from information_schema.columns where table_schema = 'public' and table_name = 'stock_movements' and column_name = 'ref_id';
+  if not found then raise exception 'stock_movements.ref_id がありません。Claudeに伝えてください'; end if;
+  perform 1 from information_schema.columns where table_schema = 'public' and table_name = 'merch_order_lines' and column_name = 'order_id';
+  if not found then raise exception 'merch_order_lines.order_id がありません。Claudeに伝えてください'; end if;
   perform 1 from information_schema.columns where table_schema = 'public' and table_name = 'merch_orders' and column_name = 'channel';
   if not found then raise exception 'merch_orders.channel がありません。Claudeに伝えてください'; end if;
   perform 1 from information_schema.columns where table_schema = 'public' and table_name = 'v_stock_levels' and column_name = 'stock';
@@ -83,11 +85,12 @@ select sl.variant_id,
        (sl.stock - coalesce(b.qty, 0))::integer as local_stock
 from public.v_stock_levels sl
 left join (
+  -- 在庫の動きは ref_type/ref_id で注文の明細(merch_line)か注文(merch_order)を指している
   select sm.variant_id, sum(sm.qty) as qty
   from public.stock_movements sm
-  left join public.merch_orders mo on mo.id = sm.order_id
-  where sm.reason = 'sale_base'
-     or (sm.reason = 'reversal' and mo.channel = 'base')
+  left join public.merch_order_lines ml on sm.ref_type = 'merch_line' and ml.id = sm.ref_id
+  left join public.merch_orders mo on mo.id = coalesce(ml.order_id, case when sm.ref_type = 'merch_order' then sm.ref_id end)
+  where sm.reason = 'sale_base' or mo.channel = 'base'
   group by sm.variant_id
 ) b on b.variant_id = sl.variant_id;
 
