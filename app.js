@@ -1452,6 +1452,16 @@ async function route() {
   if (!state.people.length) { try { await boot(); } catch (e) { $app.replaceChildren(h('div', { class: 'screen' }, errorBox(e, route))); return; } }
   if (!state.by || !state.people.some(p => p.id === state.by)) { state.by = ''; await pickBy(true); }
   window.scrollTo(0, 0);
+  // BASEで許可したあと戻ってきたとき(?code=…&state=…)は、ここでトークンに換えてBASE連携画面へ
+  { const sp = new URLSearchParams(location.search);
+    if (sp.get('state') && (sp.get('code') || sp.get('error'))) {
+      const code = sp.get('code'); const st = sp.get('state');
+      history.replaceState(null, '', location.pathname + '#/base');
+      if (!code) { toast('BASEでの許可がキャンセルされました', 'err'); return baseView(); }
+      try { await api.baseSync('exchange', { code, state: st }); toast('BASEにつなぎました', 'ok'); }
+      catch (e) { toast(errMsg(e), 'err'); }
+      return baseView();
+    } }
   if (path === '/sale') return saleView(q.get('ch') === 'direct' ? 'direct' : 'base');
   if (path === '/in') return moneyView(true, q.get('plain') === '1');
   if (path === '/out') return moneyView(false);

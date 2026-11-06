@@ -6,8 +6,7 @@
 //   APP_URL                            … https://with2022kagoshima-ux.github.io/bank-quest/
 // (SUPABASE_URL と APIキーは自動で入る)
 //
-// デプロイ: supabase functions deploy base-sync --no-verify-jwt
-//   (BASEから戻ってくる callback はログイン情報を持たないため。POST はこの中で本人確認する)
+// デプロイ: supabase functions deploy base-sync   (Verify JWT はオンのままでOK)
 
 import { computeLines, suggest, type BaseItem, type MapRow } from './logic.ts';
 
@@ -20,7 +19,8 @@ const CLIENT_ID = Deno.env.get('BASE_CLIENT_ID') || '';
 const CLIENT_SECRET = Deno.env.get('BASE_CLIENT_SECRET') || '';
 const APP_URL = (Deno.env.get('APP_URL') || 'https://with2022kagoshima-ux.github.io/bank-quest/').replace(/\/?$/, '/');
 const APP_ORIGIN = new URL(APP_URL).origin;
-const REDIRECT = `${SB_URL}/functions/v1/base-sync/callback`;
+// BASEからはバンクエの画面に戻し、画面がログイン状態のまま code をここへ送る(Verify JWT をオンのまま使える)
+const REDIRECT = APP_URL;
 const BASE_API = 'https://api.thebase.in/1';
 
 class UserError extends Error {}
@@ -156,6 +156,7 @@ async function handle(action: string, body: Record<string, unknown>, user: { id:
     u.search = new URLSearchParams({ response_type: 'code', client_id: CLIENT_ID, redirect_uri: REDIRECT, scope: 'read_users read_items write_items', state }).toString();
     return { url: u.toString() };
   }
+  if (action === 'exchange') return await exchange(String(body.code || ''), String(body.state || ''), user);
   if (action === 'disconnect') {
     await db('base_tokens?id=eq.1', { method: 'DELETE', prefer: 'return=minimal' });
     return { ok: true };
@@ -230,34 +231,27 @@ async function handle(action: string, body: Record<string, unknown>, user: { id:
   throw new UserError('不明な操作です');
 }
 
-// ---------- BASE から戻ってくる場所 ----------
-async function callback(url: URL) {
-  const back = (q: string) => Response.redirect(`${APP_URL}#/base?${q}`, 302);
-  const code = url.searchParams.get('code'); const state = url.searchParams.get('state') || '';
-  if (url.searchParams.get('error') || !code) return back('error=' + encodeURIComponent('BASEでの許可がキャンセルされました'));
-  const st = await db(`base_oauth_states?state=eq.${encodeURIComponent(state)}&select=state,created_at`);
+// ---------- BASE から戻ってきた code をトークンに換える(画面から呼ぶ) ----------
+async function exchange(code: string, state: string, user: { id: string }) {
+  if (!code) throw new UserError('BASEでの許可がキャンセルされました');
   await db(`base_oauth_states?created_at=lt.${new Date(Date.now() - 600_000).toISOString()}`, { method: 'DELETE', prefer: 'return=minimal' }).catch(() => {});
-  if (!st.length || Date.now() - new Date(st[0].created_at).getTime() > 600_000) return back('error=' + encodeURIComponent('時間切れです。もう一度つないでください'));
+  const st = await db(`base_oauth_states?state=eq.${encodeURIComponent(state)}&select=state,user_id,created_at`);
+  if (!st.length || Date.now() - new Date(st[0].created_at).getTime() > 600_000) throw new UserError('時間切れです。もう一度つないでください');
+  if (st[0].user_id && st[0].user_id !== user.id) throw new UserError('つなぎ始めた人と同じアカウントで操作してください');
   await db(`base_oauth_states?state=eq.${encodeURIComponent(state)}`, { method: 'DELETE', prefer: 'return=minimal' });
+  const t = await tokenRequest({ grant_type: 'authorization_code', code });
+  let shop: string | null = null;
   try {
-    const t = await tokenRequest({ grant_type: 'authorization_code', code });
-    let shop: string | null = null;
-    try {
-      const me = await fetch(`${BASE_API}/users/me`, { headers: { Authorization: `Bearer ${t.access_token}` } }).then(r => r.json());
-      shop = (me.user && (me.user.shop_name || me.user.shop_id)) || null;
-    } catch { /* 名前が取れなくても続ける */ }
-    await saveToken(t, { shop_name: shop });
-    return back('connected=1');
-  } catch (e) {
-    return back('error=' + encodeURIComponent(e instanceof Error ? e.message : 'BASEとの接続に失敗しました'));
-  }
+    const me = await fetch(`${BASE_API}/users/me`, { headers: { Authorization: `Bearer ${t.access_token}` } }).then(r => r.json());
+    shop = (me.user && (me.user.shop_name || me.user.shop_id)) || null;
+  } catch { /* 名前が取れなくても続ける */ }
+  await saveToken(t, { shop_name: shop });
+  return { ok: true, shop_name: shop };
 }
 
 Deno.serve(async req => {
-  const url = new URL(req.url);
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   try {
-    if (req.method === 'GET' && url.pathname.endsWith('/callback')) return await callback(url);
     if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
     const user = await requireMember(req);
     const body = await req.json().catch(() => ({}));

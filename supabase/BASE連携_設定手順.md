@@ -20,7 +20,7 @@ https://developers.thebase.com/ から申請します。
 
 - **アプリ名**: Wiθ BANK QUEST など
 - **コールバックURL（リダイレクトURI）**:
-  `https://ggqnpniygowcqqxktbbt.supabase.co/functions/v1/base-sync/callback`
+  `https://with2022kagoshima-ux.github.io/bank-quest/`（BASEで許可したあと、バンクエの画面に戻ってきます）
 - **使う権限**: `read_users` `read_items` `write_items`
 
 通ると **Client ID** と **Client Secret** がもらえます。Secret は人に見せたり、GitHubに上げたりしないでください。
@@ -39,10 +39,10 @@ Supabase のダッシュボード → **SQL Editor** を開きます。
 ```
 supabase login
 supabase link --project-ref ggqnpniygowcqqxktbbt
-supabase functions deploy base-sync --no-verify-jwt
+supabase functions deploy base-sync
 ```
 
-`--no-verify-jwt` は必ず付けてください。BASEから戻ってくるときはログイン情報が付いていないためです。本人確認はプログラムの中でしています。
+Verify JWT はオンのままで大丈夫です（呼び出すのはログイン中のバンクエ画面だけです）。
 
 ### ダッシュボードだけでやる場合
 
@@ -50,7 +50,6 @@ supabase functions deploy base-sync --no-verify-jwt
 
 - 名前: `base-sync`
 - `index.ts` と `logic.ts` の2つのファイルを作り、それぞれ中身を貼り付けます。
-- 設定の **Verify JWT** をオフにします。
 
 ## 4. シークレットを登録する
 
