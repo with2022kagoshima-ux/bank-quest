@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=32';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=32';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=33';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=33';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/06-32'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/06-33'),
   ]);
 }
 
@@ -409,8 +409,10 @@ async function loanView(mode) {
     : h('p', { class: 'empty' }, mode === 'offset' ? '借入と未払いの両方がある人がいません。' : '対象の人がいません。'),
   field('金額', h('div', { class: 'with-btn' }, amt.el, M.max ? maxBtn : null)), field('内容', memo), field('日付', date), msg, submit);
   const hist = h('div', { class: 'advhist' });
-  body.replaceChildren(form, mode === 'reimburse' || mode === 'offset' ? hist : null);
-  if (mode === 'reimburse' || mode === 'offset') {
+  body.replaceChildren(form, hist);
+  {
+    const isLoan = mode === 'loan' || mode === 'repay';
+    const kinds = isLoan ? ['loan', 'loan_repay', 'opening_receivable', 'offset'] : ['expense_advanced', 'reimburse', 'offset'];
     let rows = null;
     const draw = () => {
       if (!rows) return;
@@ -419,6 +421,7 @@ async function loanView(mode) {
       const list = mine.map(r => {
         const [ico, label, sg] = KIND[r.kind] || ['•', r.kind, 0];
         const adv = r.kind === 'expense_advanced';
+        const inc = r.kind === 'loan_repay';
         const name = adv ? r.payer_name : r.party_name;
         return h('div', { class: 'lrow' },
           h('span', { class: 'lico' }, ico),
@@ -426,13 +429,13 @@ async function loanView(mode) {
             h('div', { class: 'lmemo' }, r.memo || r.category_name || label),
             h('div', { class: 'lsub' }, [r.occurred_on.replaceAll('-', '/'), !f.party && name, adv ? '立替' : label].filter(Boolean).join(' · ')),
             adv && r.adv ? h('div', { class: 'ltags' }, h('i', { class: 'tag ' + (r.adv.status === '精算済み' ? 'ok' : r.adv.status === '一部精算' ? 'mid' : 'pay') }, r.adv.status + (r.adv.status === '精算済み' ? '' : '・残り ' + yen(r.adv.remaining)))) : null),
-          h('div', { class: 'lamt ' + (adv ? 'neg' : 'pos') }, (adv ? '' : '') + yen(r.amount).replace('−', '')));
+          h('div', { class: 'lamt ' + (isLoan ? (inc ? 'pos' : 'neg') : (adv ? 'neg' : 'pos')) }, yen(r.amount).replace('−', '')));
       });
-      hist.replaceChildren(h('h3', { class: 'advhist-title' }, '🧾 ' + (who ? who + 'の立替履歴' : '立替・返済の履歴(全員)')),
-        list.length ? h('div', { class: 'ledger' }, list) : h('p', { class: 'empty' }, '立替の記録はまだありません。'));
+      hist.replaceChildren(h('h3', { class: 'advhist-title' }, (isLoan ? '👤 ' : '🧾 ') + (who ? who + (isLoan ? 'の借入・返済履歴' : 'の立替履歴') : (isLoan ? '借入・返済の履歴(全員)' : '立替・返済の履歴(全員)'))),
+        list.length ? h('div', { class: 'ledger' }, list) : h('p', { class: 'empty' }, isLoan ? '借入・返済の記録はまだありません。' : '立替の記録はまだありません。'));
     };
     f.onParty = draw;
-    api.ledger(500).then(r => { rows = r.filter(x => x.posting !== 'draft' && (x.kind === 'expense_advanced' || x.kind === 'reimburse' || x.kind === 'offset')); draw(); }).catch(() => {});
+    api.ledger(500).then(r => { rows = r.filter(x => x.posting !== 'draft' && kinds.includes(x.kind)); draw(); }).catch(() => {});
   }
 }
 
