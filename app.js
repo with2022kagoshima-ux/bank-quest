@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=33';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=33';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=34';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=34';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -968,6 +968,9 @@ async function liveView(id) {
         h('button', { class: 'btn in', onclick: () => liveEntryModal(l, true, reload) }, '💰 収入を追加'),
         h('button', { class: 'btn out', onclick: () => liveEntryModal(l, false, reload) }, '💸 支出を追加')),
       upCard, ovnCard, airCard,
+      h('section', { class: 'card' }, h('div', { class: 'cap' }, '🛒 BASEの在庫'),
+        h('p', { class: 'hint' }, '物販の入力が終わったら押してください。前回の反映から増えた・減った数だけをBASEに足し引きします。'),
+        h('button', { class: 'btn', style: 'width:100%', onclick: () => baseSyncModal(l.id, reload) }, '🛒 BASEの在庫に反映')),
       h('div', { class: 'cap sec' }, 'このライブのお金'),
       ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだ記録がありません。')]),
       unsettled ? h('p', { class: 'hint' }, '立替の返済は、ホームの「立替を返す・相殺」から行います。') : null,
@@ -1088,6 +1091,130 @@ async function airPreview(file, box, existing, reload, opt = {}) {
       opt.liveId ? h('button', { class: 'btn', onclick: async () => { try { await api.airLink(opt.date, opt.liveId, state.by); if (useOvn && ovn) await api.airLinkOvernight(opt.liveId, state.by); toast('このライブにひも付けました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); } } }, 'この日の会計をこのライブにひも付ける') : null)));
 }
 
+// ---------- BASE在庫連携 ----------
+// バンクエで増えた・減った数(ライブの売上・入荷など)だけを BASE に足し引きする。
+// BASEで売れた分はBASE側ですでに減っているので、上書きはしない。
+const pm = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(n);
+
+async function baseSyncModal(liveId, done) {
+  const box = h('div', {}, loading());
+  const m = modal([h('h3', {}, '🛒 BASEの在庫に反映'), box]);
+  const draw = (lines, mapped) => {
+    if (!mapped) { box.replaceChildren(h('p', { class: 'hint' }, 'まだBASEの商品と紐づいていません。先に「BASE連携」で紐づけてください。'), h('a', { class: 'btn big', href: '#/base', onclick: () => m.close() }, 'BASE連携をひらく')); return; }
+    if (!lines.length) { box.replaceChildren(h('p', { class: 'hint' }, `前回の反映から、在庫の増減はありません（紐づけ ${mapped}件）。`), h('button', { class: 'btn ghost', style: 'width:100%', onclick: () => m.close() }, '閉じる')); return; }
+    const okLines = lines.filter(l => !l.problem);
+    const rows = lines.map(l => h('div', { class: 'lrow' + (l.problem ? ' dead' : '') },
+      h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, l.label),
+        h('div', { class: 'lsub' }, l.problem ? l.problem : `BASE ${l.base_now}点 → ${l.target}点`),
+        l.clamped ? h('div', { class: 'ltags' }, h('i', { class: 'tag mid' }, '0点で止めます(数がずれています)')) : null),
+      h('div', { class: 'lamt ' + (l.delta < 0 ? 'neg' : 'pos') }, pm(l.delta))));
+    const msg = h('p', { class: 'form-err', role: 'alert' });
+    const ok = h('button', { class: 'btn big', disabled: !okLines.length, onclick: async () => {
+      if (!state.by) { await pickBy(true); if (!state.by) return; }
+      ok.disabled = true; msg.textContent = ''; ok.textContent = '反映しています…';
+      try {
+        const r = await api.baseSync('apply', { by: nameOf(state.by), live_id: liveId || null });
+        box.replaceChildren(
+          h('p', { class: 'hint' }, r.failed ? `${r.ok}件を反映しました。${r.failed}件は反映できませんでした。` : `✅ ${r.ok}件をBASEに反映しました。`),
+          ...r.results.map(l => h('div', { class: 'lrow' + (l.ok ? '' : ' dead') },
+            h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, l.label), h('div', { class: 'lsub' }, l.ok ? `BASE ${l.base_now}点 → ${l.target}点` : '× ' + (l.error || '反映できませんでした'))),
+            h('div', { class: 'lamt ' + (l.delta < 0 ? 'neg' : 'pos') }, pm(l.delta)))),
+          h('button', { class: 'btn ghost', style: 'width:100%;margin-top:8px', onclick: () => { m.close(); if (done) done(); } }, '閉じる'));
+        if (!r.failed) toast('BASEの在庫を更新しました', 'ok');
+      } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; ok.textContent = 'もう一度反映する'; }
+    } }, `BASEに反映する（${okLines.length}件）`);
+    box.replaceChildren(h('p', { class: 'hint' }, '前回BASEに反映してから増えた・減った数だけを、BASEの在庫に足し引きします。BASEで売れた分はそのまま残ります。'), ...rows, msg, ok);
+  };
+  try { const r = await api.baseSync('preview'); draw(r.lines, r.mapped); }
+  catch (e) { box.replaceChildren(h('p', { class: 'form-err' }, errMsg(e)), h('button', { class: 'btn ghost', style: 'width:100%', onclick: () => m.close() }, '閉じる')); }
+}
+
+function pickBaseModal(p, v, items, cur, done) {
+  const q = h('input', { type: 'text', placeholder: 'BASEの商品名で絞り込む', autocomplete: 'off', value: p.name });
+  const list = h('div', {});
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const save = async (it, vr) => {
+    msg.textContent = '';
+    try {
+      await api.baseSync('map', it ? { variant_id: v.id, base_item_id: it.item_id, base_variation_id: vr ? vr.variation_id : null, base_label: vr ? `${it.title} / ${vr.variation}` : it.title, by: nameOf(state.by) }
+        : { variant_id: v.id, base_item_id: null });
+      m.close(); toast(it ? '紐づけました' : '紐づけを外しました', 'ok'); done();
+    } catch (e) { msg.textContent = errMsg(e); }
+  };
+  const draw = () => {
+    const t = normKey(q.value);
+    const hits = items.filter(it => !t || normKey(it.title).includes(t));
+    list.replaceChildren(...(hits.length ? hits.slice(0, 30).map(it => h('div', { class: 'card mini' },
+      h('div', { class: 'lmemo' }, it.title),
+      it.variations.length ? h('div', { class: 'chips' }, ...it.variations.map(vr => h('button', { type: 'button', class: 'chip', onclick: () => save(it, vr) },
+        h('span', { class: 'chip-main' }, vr.variation), h('span', { class: 'chip-sub' }, `BASE ${vr.variation_stock}点`))))
+        : h('button', { class: 'btn small', onclick: () => save(it, null) }, `これにする（BASE ${it.stock}点）`))) : [h('p', { class: 'empty' }, '見つかりません。商品名を短くして探してください。')]));
+  };
+  q.addEventListener('input', draw);
+  const m = modal([h('h3', {}, `${p.name}  ${vLabel(v)}`),
+    h('p', { class: 'hint' }, cur ? `いまの紐づけ: ${cur.base_label}` : 'BASEのどの商品・色・サイズと同じかを選んでください。紐づけた時点ではBASEの在庫は変わりません。'),
+    q, msg, list, cur ? h('button', { class: 'btn ghost', style: 'width:100%;margin-top:8px', onclick: () => save(null) }, '紐づけを外す') : null]);
+  draw();
+}
+const normKey = s => String(s || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+
+async function baseView(q) {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('🛒 BASE連携', body, '#/manage'));
+  if (q && q.get('connected')) toast('BASEにつなぎました', 'ok');
+  if (q && q.get('error')) toast(q.get('error'), 'err');
+  const reload = () => baseView();
+  try {
+    const st = await api.baseSync('status');
+    if (my !== renderId) return;
+    const connect = async () => { try { const r = await api.baseSync('connect'); location.href = r.url; } catch (e) { toast(errMsg(e), 'err'); } };
+    const head = h('section', { class: 'card' }, h('div', { class: 'cap' }, '🔗 BASEとの接続'),
+      st.connected ? h('div', { class: 'lmemo' }, '✅ つながっています' + (st.shop_name ? `（${st.shop_name}）` : '')) : h('div', { class: 'lmemo' }, 'まだつないでいません'),
+      !st.configured ? h('p', { class: 'note' }, 'BASE Developers の Client ID / Secret がまだ設定されていません。設定が終わるとつなげるようになります。') : null,
+      h('div', { class: 'duo', style: 'margin-top:10px' },
+        h('button', { class: 'btn small', disabled: !st.configured, onclick: connect }, st.connected ? 'つなぎ直す' : 'BASEにつなぐ'),
+        st.connected ? h('button', { class: 'btn small ghost', onclick: async () => { if (await confirmBox('BASEとの接続を切る？', '紐づけは残ります。反映するには、もう一度つなぐ必要があります。', '切る')) { try { await api.baseSync('disconnect'); reload(); } catch (e) { toast(errMsg(e), 'err'); } } } }, '接続を切る') : null));
+    if (!st.connected) { body.replaceChildren(head, h('p', { class: 'hint' }, 'つなぐと、ライブのあとに「BASEに反映」ボタンで在庫を足し引きできるようになります。')); return; }
+    body.replaceChildren(head, h('section', { class: 'card' }, loading()));
+    const [products, maps, itemsR, log] = await Promise.all([api.products(), api.baseMaps(), api.baseSync('items'), api.baseLog().catch(() => [])]);
+    if (my !== renderId) return;
+    const items = itemsR.items || [];
+    const mapOf = new Map(maps.map(x => [x.variant_id, x]));
+    const act = products.filter(p => p.is_active).map(p => ({ ...p, variants: p.variants.filter(v => v.is_active) })).filter(p => p.variants.length);
+    const unmapped = act.flatMap(p => p.variants.filter(v => !mapOf.has(v.id)).map(v => ({ p, v })));
+    const sugBox = h('div', {});
+    const sugBtn = unmapped.length ? h('button', { class: 'btn small ghost', style: 'width:100%', onclick: async () => {
+      sugBtn.disabled = true; sugBox.replaceChildren(loading());
+      try {
+        const r = await api.baseSync('suggest', { variants: unmapped.map(x => ({ variant_id: x.v.id, product: x.p.name, color: x.v.color, size: x.v.size })) });
+        const hits = r.suggestions.filter(s => s.hit).map(s => ({ ...s, x: unmapped.find(u => u.v.id === s.variant_id) }));
+        if (!hits.length) { sugBox.replaceChildren(h('p', { class: 'hint' }, '名前から自動で決められるものはありませんでした。1つずつ選んでください。')); return; }
+        const all = h('button', { class: 'btn big', onclick: async () => {
+          all.disabled = true; let n = 0; const errs = [];
+          for (const s of hits) { try { await api.baseSync('map', { variant_id: s.variant_id, base_item_id: s.hit.item_id, base_variation_id: s.hit.variation_id, base_label: s.hit.label, by: nameOf(state.by) }); n++; } catch (e) { errs.push(`${s.x.p.name} ${vLabel(s.x.v)}: ${errMsg(e)}`); } }
+          toast(`${n}件を紐づけました`, errs.length ? 'err' : 'ok'); if (errs.length) alert(errs.join('\n')); reload();
+        } }, `この${hits.length}件をまとめて紐づける`);
+        sugBox.replaceChildren(h('p', { class: 'hint' }, '名前が一致した候補です。違うものがあれば、紐づけたあとに1つずつ直せます。'),
+          ...hits.map(s => h('div', { class: 'lrow' }, h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, `${s.x.p.name}  ${vLabel(s.x.v)}`), h('div', { class: 'lsub' }, '→ BASE: ' + s.hit.label)))), all);
+      } catch (e) { sugBox.replaceChildren(h('p', { class: 'form-err' }, errMsg(e))); sugBtn.disabled = false; }
+    } }, `🪄 名前から自動で候補を出す（未設定 ${unmapped.length}件）`) : null;
+    const rows = act.map(p => [h('div', { class: 'cap sec' }, p.name), ...p.variants.map(v => {
+      const cur = mapOf.get(v.id);
+      return h('div', { class: 'lrow' + (cur ? '' : ' draft') },
+        h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, vLabel(v)), h('div', { class: 'lsub' }, cur ? '→ BASE: ' + cur.base_label : '未設定（BASEに無ければこのままでOK）')),
+        h('div', { class: 'lamt' }, v.stock + '点'),
+        h('button', { class: 'undo', onclick: () => pickBaseModal(p, v, items, cur, reload) }, cur ? '変更' : '選ぶ'));
+    })]);
+    const logCard = log.length ? h('section', { class: 'card' }, h('div', { class: 'cap' }, '📜 最近の反映'),
+      ...log.map(r => h('p', { class: 'hint' }, `${String(r.run_at).slice(0, 16).replace('T', ' ').replaceAll('-', '/')}  ${r.run_by || ''}  ${r.ok}件${r.failed ? `（失敗 ${r.failed}件）` : ''}`))) : null;
+    body.replaceChildren(head,
+      h('button', { class: 'btn big in', style: 'width:100%', onclick: () => baseSyncModal(null, reload) }, '🛒 BASEの在庫に反映'),
+      h('p', { class: 'hint' }, `紐づけ ${maps.length}件 / BASEの商品 ${items.length}件。紐づけた時点の在庫を基準にして、その後に増えた・減った数だけを反映します。`),
+      logCard, sugBtn, sugBox, ...rows.flat());
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, reload)); }
+}
+
 // ---------- 管理: 定期費用・テンプレート・バックアップ ----------
 const lastBackup = () => { try { return localStorage.getItem('withi_last_backup') || ''; } catch { return ''; } };
 const daysSince = iso => (iso ? Math.floor((Date.now() - Date.parse(iso)) / 86400000) : null);
@@ -1187,6 +1314,7 @@ function manageView() {
     row('📊', '分析', '月ごとの収支・カテゴリ別・ライブ別・物販の売れ筋', '#/analysis'),
     row('🔁', '定期費用', '毎月・毎年かかる費用を登録。期限が来たらホームでお知らせ', '#/recurring'),
     row('⭐', 'テンプレート', 'よく使う入力を1タップで呼び出す', '#/templates'),
+    row('🛒', 'BASE連携', 'BASEの商品との紐づけ・在庫の反映', '#/base'),
     row('📥', 'Airレジ売上(月ごとにまとめて取り込む)', 'ふだんはライブの画面から取り込めます。日ごとのひも付けの確認はここ', '#/air'),
     row('💾', 'バックアップ', lb ? `最後に作った日: ${dshow(lb)}（${d}日前）` : 'まだ作っていません', '#/backup'))));
 }
@@ -1335,6 +1463,7 @@ async function route() {
   if (path === '/templates') return templatesView();
   if (path === '/backup') return backupView();
   if (path === '/air') return airView();
+  if (path === '/base') return baseView(q);
   if (path === '/live-list') return liveListView();
   if (path === '/live') return liveView(q.get('id'));
   if (path === '/live-sale') return saleView('live', q.get('id'));

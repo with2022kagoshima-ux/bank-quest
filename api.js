@@ -332,6 +332,20 @@ const real = {
   },
   stockMove: m => rest('stock_movements', { method: 'POST', prefer: 'return=minimal', body: { variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo || null, created_by: m.by } }),
   stockHistory: vid => rest(`stock_movements?select=qty,reason,occurred_on,memo&variant_id=eq.${vid}&order=occurred_on.desc,created_at.desc&limit=30`),
+  // ---- BASE在庫連携 (Edge Function base-sync を通す。BASEのトークンは画面に来ない) ----
+  async baseSync(action, body = {}) {
+    const s = await freshSession();
+    let r;
+    try {
+      r = await fetch(`${C.url}/functions/v1/base-sync`, { method: 'POST', headers: { apikey: C.key, Authorization: `Bearer ${s.access}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...body }) });
+    } catch { throw new ApiError('通信できません。電波のある場所でもう一度お試しください。', 'net'); }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 404) throw new ApiError('BASE連携の中継(Edge Function)がまだ設置されていません', 'api');
+    if (!r.ok) throw new ApiError(j.error || 'BASE連携でエラーが発生しました', 'api');
+    return j;
+  },
+  baseMaps: () => rest('base_item_map?select=variant_id,base_item_id,base_variation_id,base_label,baseline,synced_at'),
+  baseLog: () => rest('base_sync_log?select=run_at,run_by,ok,failed,lines&order=run_at.desc&limit=10'),
 };
 
 // =====================================================================
@@ -507,6 +521,17 @@ function makeDemo() {
     async addProduct(f) { await wait(); mkp(f.name, f.category || null, [[f.size || null, f.color || null, f.price, f.cost, 0]]); },
     async stockMove(m) { await wait(); const o = PR.flatMap(x => x.vars).find(x => x.id === m.variant_id); o.stock += m.qty; MV.unshift({ variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo }); },
     async stockHistory(vid) { await wait(); return MV.filter(x => x.variant_id === vid); },
+    async baseSync(action) {
+      await wait();
+      if (action === 'status') return { configured: true, connected: true, shop_name: 'デモショップ', mapped: 0 };
+      if (action === 'items') return { items: [] };
+      if (action === 'suggest') return { suggestions: [] };
+      if (action === 'preview') return { lines: [], mapped: 0 };
+      if (action === 'apply') return { results: [], ok: 0, failed: 0 };
+      return { ok: true };
+    },
+    async baseMaps() { await wait(); return []; },
+    async baseLog() { await wait(); return []; },
     async merchSale(o) {
       await wait();
       const vs = allV(); let sales = 0;
