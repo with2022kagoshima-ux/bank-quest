@@ -191,6 +191,25 @@ async function handle(action: string, body: Record<string, unknown>, user: { id:
     }
     return { ok: true };
   }
+  if (action === 'align') {
+    // 初回だけ: 指定した色・サイズのBASE在庫を、いまのバンクエ在庫(0未満は0)にそろえ、基準もそこにする
+    const ids = new Set(((body.variant_ids as string[]) || []).map(String));
+    const maps: MapRow[] = (await db('base_item_map?select=variant_id,base_item_id,base_variation_id,base_label,baseline')).filter((m: MapRow) => ids.has(m.variant_id));
+    const local = await localStock();
+    const results = [];
+    for (const m of maps) {
+      const now = local.get(m.variant_id) ?? 0; const target = Math.max(0, now);
+      try {
+        await base('/items/edit_stock', { method: 'POST', form: m.base_variation_id == null
+          ? { item_id: m.base_item_id, stock: target }
+          : { item_id: m.base_item_id, variation_id: m.base_variation_id, variation_stock: target } });
+        await db(`base_item_map?variant_id=eq.${encodeURIComponent(m.variant_id)}`, { method: 'PATCH', prefer: 'return=minimal', body: { baseline: now, synced_at: new Date().toISOString() } });
+        results.push({ variant_id: m.variant_id, label: m.base_label, target, ok: true });
+      } catch (e) { results.push({ variant_id: m.variant_id, label: m.base_label, ok: false, error: e instanceof Error ? e.message : String(e) }); }
+    }
+    await db('base_sync_log', { method: 'POST', prefer: 'return=minimal', body: { run_by: String(body.by || ''), ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, lines: results.map(r => ({ ...r, kind: 'align' })) } }).catch(() => {});
+    return { results };
+  }
   if (action === 'preview') {
     return await buildLines();
   }
