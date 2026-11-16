@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/06-33'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/16-34'),
   ]);
 }
 
@@ -290,9 +290,27 @@ function claimToggle() {
 async function claimAct(r, ok, after) {
   if (!state.by) { await pickBy(true); if (!state.by) return; }
   const t = `${r.payer_name || ''} ${r.memo || r.category_name || ''}  ${yen(r.amount)}`;
-  const go = await confirmBox(ok ? 'この請求を承認する？' : 'この請求を却下する？', ok ? `${t}\n承認すると、${r.payer_name || ''}への未払い(未精算)になり、利益にも入ります。` : `${t}\n却下すると、この請求は消えます(操作の記録は残ります)。`, ok ? '承認する' : '却下する');
-  if (!go) return;
-  try { if (ok) await api.approveClaim(r.id); else await api.rejectClaim(r.id); toast(ok ? '承認しました。未払いに入りました' : '却下しました', 'ok'); after(); } catch (e) { toast(errMsg(e), 'err'); }
+  if (!ok) {
+    if (!(await confirmBox('この請求を却下する？', `${t}\n却下すると、この請求は消えます(操作の記録は残ります)。`, '却下する'))) return;
+    try { await api.rejectClaim(r.id); toast('却下しました', 'ok'); after(); } catch (e) { toast(errMsg(e), 'err'); }
+    return;
+  }
+  const amt = amountField(r.amount); const f = { keep: false }; const msg = h('p', { class: 'form-err', role: 'alert' });
+  const go = h('button', { class: 'btn big in', onclick: async () => {
+    msg.textContent = ''; const a = amt.get();
+    if (!(a > 0)) { msg.textContent = '承認する金額を入れてください(全部却下するなら、閉じて「却下」を押してください)'; return; }
+    if (a > r.amount) { msg.textContent = `請求額 ${yen(r.amount)} を超えています`; return; }
+    go.disabled = true;
+    try { await api.approveClaim(r.id, { amount: a, keep: f.keep }); m.close(); toast(a < r.amount ? `${yen(a)}を承認しました` + (f.keep ? `。残り${yen(r.amount - a)}は審査中です` : `。残りは却下しました`) : '承認しました。未払いに入りました', 'ok'); after(); }
+    catch (e) { msg.textContent = errMsg(e); go.disabled = false; }
+  } }, '承認する');
+  const restBox = h('div', { class: 'field' }, h('span', { class: 'field-label' }, '承認しない残りは？'),
+    chips([{ id: '', label: '却下する' }, { id: 'k', label: '審査中のまま' }], '', id => { f.keep = id === 'k'; }));
+  const upd = () => { restBox.style.display = amt.get() > 0 && amt.get() < r.amount ? '' : 'none'; };
+  amt.el.addEventListener('input', upd); upd();
+  const m = modal([h('h3', {}, '✅ 承認する金額'), h('p', { class: 'muted' }, t + '\n全額なら、そのまま「承認する」。一部だけなら金額を減らしてください。'),
+    field('承認する金額', amt.el), restBox,
+    h('p', { class: 'hint' }, '承認した分は、' + (r.payer_name || '') + 'への未払い(未精算)になり、利益にも入ります。'), msg, go]);
 }
 const claimRow = (r, after) => h('div', { class: 'brow due' },
   h('span', {}, `${r.payer_name || ''} ${yen(r.amount)}`, h('small', { style: 'display:block;color:var(--muted)' }, [dshow(r.occurred_on), r.live_name, r.category_name, r.memo].filter(Boolean).join(' ・'))),

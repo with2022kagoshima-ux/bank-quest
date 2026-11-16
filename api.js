@@ -170,8 +170,22 @@ const real = {
     const rows = await rest(`ledger_entries?${sel}&posting=eq.draft&order=occurred_on.asc,created_at.asc`);
     return rows.map(r => ({ ...r, amount: Number(r.amount), category_name: r.category && r.category.name, payer_name: r.payer && r.payer.name, live_name: r.live && r.live.event_name }));
   },
-  async approveClaim(id) { await rest(`ledger_entries?id=eq.${id}&posting=eq.draft`, { method: 'PATCH', prefer: 'return=minimal', body: { posting: 'posted' } }); },
-  async rejectClaim(id) { await rest(`ledger_entries?id=eq.${id}&posting=eq.draft`, { method: 'DELETE', prefer: 'return=minimal' }); },
+  async approveClaim(id, o = {}) {
+    const [row] = await rest(`ledger_entries?select=*&id=eq.${id}&posting=eq.draft`);
+    if (!row) throw new ApiError('この請求は、すでに処理されています');
+    const total = Number(row.amount); const amt = o.amount == null ? total : Number(o.amount);
+    if (!(amt > 0 && amt <= total)) throw new ApiError(`承認する額は1円〜${total}円で入れてください`);
+    const left = total - amt;
+    if (left > 0 && o.keep) await rest('ledger_entries', { method: 'POST', prefer: 'return=minimal', body: { id: crypto.randomUUID(), occurred_on: row.occurred_on, kind: row.kind, amount: left, category_id: row.category_id, memo: row.memo, payer_id: row.payer_id, party_id: row.party_id, source: row.source, live_id: row.live_id, posting: 'draft', created_by: row.created_by } });
+    const body = { posting: 'posted' };
+    if (left > 0) { body.amount = amt; body.memo = ((row.memo || '') + ` (請求${total.toLocaleString('ja-JP')}円のうち${amt.toLocaleString('ja-JP')}円を承認)`).trim(); }
+    await rest(`ledger_entries?id=eq.${id}&posting=eq.draft`, { method: 'PATCH', prefer: 'return=minimal', body });
+  },
+  async rejectClaim(id) {
+    const rs = await rest(`receipts?select=id,path&entry_id=eq.${id}`);
+    for (const r of rs) await this.removeReceipt(r);
+    await rest(`ledger_entries?id=eq.${id}&posting=eq.draft`, { method: 'DELETE', prefer: 'return=minimal' });
+  },
   async addEntry(e) {
     const body = {
       id: crypto.randomUUID(),
@@ -417,7 +431,7 @@ function makeDemo() {
       }));
     },
     async claims() { await wait(); const nm = pid => (P.find(p => p.id === pid) || {}).name; return E.filter(e => e.posting === 'draft').map(e => ({ ...e, category_name: (CATS.find(c => c.id === e.category_id) || {}).name, payer_name: nm(e.payer_id), live_name: e.live_id ? ((LV.find(l => l.id === e.live_id) || {}).event_name || '') : '' })); },
-    async approveClaim(id) { await wait(); const e = E.find(x => x.id === id); if (e) e.posting = 'posted'; },
+    async approveClaim(id, o = {}) { await wait(); const e = E.find(x => x.id === id && x.posting === 'draft'); if (!e) throw new ApiError('この請求は、すでに処理されています'); const amt = o.amount == null ? e.amount : o.amount; if (!(amt > 0 && amt <= e.amount)) throw new ApiError('承認する額が正しくありません'); const left = e.amount - amt; if (left > 0 && o.keep) add({ ...e, id: undefined, amount: left, posting: 'draft' }); e.amount = amt; e.posting = 'posted'; },
     async rejectClaim(id) { await wait(); const i = E.findIndex(x => x.id === id && x.posting === 'draft'); if (i >= 0) E.splice(i, 1); },
     async addEntry(e) { await wait(); const r0 = add({ occurred_on: e.date, kind: e.kind, amount: e.amount, category_id: e.category_id, memo: e.memo, payer_id: e.payer_id, party_id: e.party_id, live_id: e.live_id || null, source: e.live_id ? 'live' : 'manual', posting: e.posting || 'posted' }); return { queued: false, id: r0.id }; },
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
