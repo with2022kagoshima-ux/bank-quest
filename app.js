@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=50';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=54';
 import * as R from './rules.js?v=50';
 import { squareMaker, storyMaker } from './snsmk.js?v=50';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-53'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-54'),
   ]);
 }
 
@@ -1049,6 +1049,16 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
+  const sendGf = async (c, p) => {
+    if (block) { toast(block, 'err'); return; }
+    if (!(await confirmBox('予約フォームに追加しますか？', 'チケット予約のGoogleフォームに、この公演の質問を日付順の位置に追加します。同じ公演がすでにあれば追加しません。', '追加する'))) return;
+    try {
+      const j = await api.gforms({ action: 'add', title: c.title, body: c.body, options: c.options, required: !!c.required, dateKey: R.formDateKey(String(l.live_date || '').slice(0, 10)), venue: R.venuePlainName(ml) });
+      const hist = [...(p?.history || []), { at: new Date().toISOString(), status: 'success', url: j.url, id: j.id || '', by: state.by || null }].slice(-30);
+      await api.saveLivePost(l.id, 'googleForm', { status: 'success', history: hist }, state.by);
+      toast(j.message, 'ok'); reload();
+    } catch (e) { toast(errMsg(e), 'err'); }
+  };
   const cards = ANN_DESTS.map(k => {
     const def = R.getDestination(k); const gen = R.generateContent(ml, k); const p = pm.get(k);
     const c = p && p.edited ? { ...gen, body: p.body ?? gen.body, hashtags: p.hashtags ?? gen.hashtags } : gen;
@@ -1072,8 +1082,11 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'wordpress' && !conf ? h('button', { class: 'btn small', onclick: () => sendWp(c, p, false) }, '🌐 下書きを送る') : null,
         k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => sendWp(c, p, true) }, '公開して送る') : null,
         k === 'wordpress' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.wpPublish({ check: true })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
+        k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
+        k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
+        k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.gforms({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
-      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && k === 'wordpress' ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
+      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
   });
   return h('section', { class: 'card' }, h('div', { class: 'cap' }, '📝 投稿先ごとの文章と進行'),
@@ -2021,6 +2034,10 @@ async function route() {
       catch (e) { toast(errMsg(e), 'err'); }
       return baseView();
     } }
+  { const sp = new URLSearchParams(location.search); const gg = sp.get('google');
+    if (gg) { history.replaceState(null, '', location.pathname + location.hash);
+      const GM = { ok: ['Googleと連携できました', 'ok'], denied: ['Googleでの許可がキャンセルされました', 'err'], expired: ['連携の有効時間が切れました。もう一度「Googleと連携する」を押してください', 'err'], norefresh: ['Googleから連携用の情報を受け取れませんでした。もう一度お試しください', 'err'] };
+      const m2 = GM[gg] || ['Googleとの連携でエラーが発生しました', 'err']; toast(m2[0], m2[1]); } }
   if (path === '/sale') return saleView(q.get('ch') === 'direct' ? 'direct' : 'base');
   if (path === '/in') return moneyView(true, q.get('plain') === '1');
   if (path === '/out') return moneyView(false);
