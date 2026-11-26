@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=37';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=37';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=38';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=38';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-37'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-38'),
   ]);
 }
 
@@ -932,21 +932,30 @@ function venueEmailModal(live, done) {
   } }, '保存する');
   const m = modal([h('h3', {}, '✉️ ' + (live.venue_name || '会場') + ' の連絡先'), h('p', { class: 'hint' }, 'セット図などを送るメールアドレスです。会場ごとに1度入れれば、次回からも使えます。'), field('メールアドレス', em), msg, ok]);
 }
+function stagePlotMail(live, info, links) {
+  const ds = String(live.live_date).slice(0, 10); const [y, m, d] = ds.split('-').map(Number);
+  const wd = '日月火水木金土'[new Date(y, m - 1, d).getDay()];
+  const ev = info.official_title || live.event_name;
+  const subj = `【セット図提出】${y}/${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}「${ev}」/ Wiθ`;
+  const line = '----------------------------------------';
+  const sent = links && links.length ? '当日のセット図の方、完成いたしましたので、\n下記のリンクから提出いたします。(7日間有効)\n' + links.join('\n') : '当日のセット図の方、完成いたしましたので、\n本メールに添付して提出いたします。';
+  const body = `お世話になっております。\n${y}/${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}の${ev}に出演させていただきます、\n鹿児島の「Wiθ」のVo/Gt の夏樹です。\n\n${sent}\nご確認のほどよろしくお願いいたします。\n\n${line}\n【出演情報】\n・日程：${y}年${m}月${d}日(${wd})\n・イベント名：${ev}\n・出演名：Wiθ\n${line}\n\nご不明な点や、会場の常設機材との兼ね合いで調整が必要な箇所がございましたら、\nお手数ですがご連絡いただけますと幸いです。\n\n当日はどうぞよろしくお願いいたします！！\n\n${line}\n榎木 夏樹 Wiθ Vo/Gt\n080-3992-2056\n${line}`;
+  return { subj, body };
+}
 async function sendStagePlot(live, info, files) {
   const plots = files.filter(f => f.kind === 'stageplot');
   const links = (await Promise.all(plots.map(f => api.liveFileUrl(f.path, 604800).catch(() => null)))).filter(Boolean);
-  const d = String(live.live_date).slice(0, 10).replaceAll('-', '/');
-  const subj = `【Wiθ】${d} ${info.official_title || live.event_name} セット図のご提出`;
-  const body = `${live.venue_name || ''} ご担当者様\n\nお世話になっております。Wiθ(鹿児島)です。\n${d} ${info.official_title || live.event_name} の出演にあたり、セット図をお送りします。\nご確認のほど、よろしくお願いいたします。\n` + (links.length ? '\n▼セット図(7日間有効)\n' + links.join('\n') + '\n' : '') + '\nWiθ';
+  const { subj, body } = stagePlotMail(live, info, links);
   location.href = `mailto:${encodeURIComponent(live.venue_email || '')}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
 }
-async function shareStagePlot(live, files) {
+async function shareStagePlot(live, info, files) {
   const plots = files.filter(f => f.kind === 'stageplot');
   if (!plots.length) { toast('先にセット図を追加してください', 'err'); return; }
   try {
     const fs = await Promise.all(plots.map(async (f, i) => { const url = await api.liveFileUrl(f.path); const b = await (await fetch(url)).blob(); return new File([b], `セット図${plots.length > 1 ? i + 1 : ''}.${f.mime === 'application/pdf' ? 'pdf' : f.mime === 'image/png' ? 'png' : 'jpg'}`, { type: f.mime }); }));
     if (!navigator.canShare || !navigator.canShare({ files: fs })) { toast('この端末では添付つき共有に未対応です。メール本文のリンクをお使いください', 'err'); return; }
-    await navigator.share({ files: fs, title: 'セット図', text: `${live.venue_name || ''} ${live.event_name} セット図` });
+    const mail = stagePlotMail(live, info, null);
+    await navigator.share({ files: fs, title: mail.subj, text: mail.body });
   } catch (e) { if (e && e.name !== 'AbortError') toast('共有できませんでした', 'err'); }
 }
 const liveTabs = new Map();
@@ -1095,9 +1104,9 @@ async function liveView(id) {
             if (!l.venue_email) { venueEmailModal(l, reload); return; }
             sendStagePlot(l, info, files);
           } }, '✉️ セット図のメールを作る'),
-          h('button', { class: 'btn ghost small', style: 'margin-top:8px', onclick: () => shareStagePlot(l, files) }, '📎 ファイルを添付して送る(共有)'),
+          h('button', { class: 'btn ghost small', style: 'margin-top:8px', onclick: () => shareStagePlot(l, info, files) }, '📎 ファイルを添付して送る(共有)'),
           l.venue_id ? h('button', { class: 'btn ghost small', style: 'margin:8px 0 0 8px', onclick: () => venueEmailModal(l, reload) }, '宛先を変更') : null,
-          h('p', { class: 'hint' }, 'メールアプリが開き、宛先・件名・本文が入った状態になります。セット図は本文のリンク(7日間有効)で届きます。ファイルとして添付したいときは「添付して送る」を使ってください。'))],
+          h('p', { class: 'hint' }, 'メールアプリが開き、宛先・件名・本文(いつもの文面)が入った状態になります。セット図は本文のリンク(7日間有効)で届きます。ファイルとして添付したいときは「添付して送る」を使ってください(件名と本文が一緒に渡されます)。'))],
       refl: () => [
         sec('🔁 反省・振り返り', info.reflection ? lines(info.reflection) : h('p', { class: 'empty' }, 'まだ書かれていません。良かったこと・直したいこと・次への課題などを書いてください。'),
           editBtn('反省・振り返り', ['reflection'])),
