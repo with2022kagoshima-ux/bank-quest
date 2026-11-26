@@ -1,6 +1,7 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=46';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=46';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=47';
+import * as R from './rules.js?v=47';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=47';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +204,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-46'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-47'),
   ]);
 }
 
@@ -961,6 +962,76 @@ async function shareStagePlot(live, info, files) {
     await navigator.share({ files: fs, title: mail.subj, text: mail.body });
   } catch (e) { if (e && e.name !== 'AbortError') toast('共有できませんでした', 'err'); }
 }
+// ---------- 告知(managerの文面生成・進行管理を移したもの) ----------
+const ANN_FIELDS = [
+  ['drinkFee', 'ドリンク代(例 +1D ¥600)', 'text'], ['bonus', '入場特典', 'text'], ['salesMethod', '販売方法・予約方法', 'area'],
+  ['shops', '出店(1行に1店。「FOOD:」のように:で終わる行は小見出し)', 'area'], ['notes', '注意事項など', 'area'], ['announcement', '追加の一言(SNSの本文に入ります)', 'area'],
+  ['playguideUrl', 'プレイガイドのURL', 'text'], ['snsHead', 'SNS本文の見出し(空欄で見出しなし。未設定は【LIVE INFO】)', 'text'],
+  ['actLabel', '出演者の見出し(未設定はACT)', 'text'], ['shopLabel', '出店の見出し(未設定はSHOP)', 'text'],
+];
+const ANN_DESTS = ['instagram', 'x', 'tiktok', 'youtube', 'wordpress', 'googleForm', 'bandsintown'];
+const ANN_STATUS = ['notStarted', 'draft', 'manualPending', 'manualDone', 'skipped'];
+function mkAnnLive(l, info) {
+  const a = info.ann || {};
+  const o = {
+    title: info.official_title || l.event_name || '', date: String(l.live_date || '').slice(0, 10), openTime: info.open_time || '', startTime: info.start_time || '', endTime: info.end_time || '',
+    venue: l.venue_name || '', region: l.prefecture || '', performers: info.performers || '', ticketPrice: info.ticket_price || '', reserveFormUrl: info.reserve_url || '', isSample: false,
+    profileReserve: a.profileReserve !== false,
+  };
+  for (const [k] of ANN_FIELDS) if (a[k] != null && a[k] !== '') o[k] = a[k];
+  if (a.snsHead === '' || a.snsHead === ' ') o.snsHead = '';
+  return o;
+}
+function annModal(l, info, done) {
+  const a = info.ann || {};
+  const els = ANN_FIELDS.map(([k, label, type]) => { const el = type === 'area' ? h('textarea', { rows: 4, class: 'area', autocomplete: 'off' }) : h('input', { type: 'text', autocomplete: 'off' }); el.value = a[k] || ''; return [k, el, label]; });
+  const pr = h('input', { type: 'checkbox' }); pr.checked = a.profileReserve !== false;
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    ok.disabled = true; msg.textContent = '';
+    try {
+      const n = {}; for (const [k, el] of els) { const v = el.value.trim(); if (v) n[k] = v; }
+      if (pr.checked === false) n.profileReserve = false;
+      await api.saveLiveInfo(l.id, { ann: Object.keys(n).length ? n : null }); m.close(); toast('保存しました', 'ok'); done();
+    } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '保存する');
+  const m = modal([h('h3', {}, '✏️ 告知の追加情報'), h('p', { class: 'hint' }, '正式名・時間・料金・出演者・予約URLは、上の「告知の情報」にあります。'), ...els.map(([k, el, label]) => field(label, el)),
+    h('label', { class: 'chk' }, pr, ' 本文に「予約はプロフィールのリンク or DMから」を入れる'), msg, ok]);
+}
+function announcePane(l, info, conf, posts, reload) {
+  const ml = mkAnnLive(l, info);
+  const pm = new Map(posts.map(p => [p.dest, p]));
+  const block = R.publishBlockReason(ml);
+  const copy = async t => { try { await navigator.clipboard.writeText(t); toast('コピーしました', 'ok'); } catch { toast('コピーできませんでした。文章を長押ししてコピーしてください', 'err'); } };
+  const save = async (k, patch) => { try { await api.saveLivePost(l.id, k, patch, state.by); reload(); } catch (e) { toast(errMsg(e), 'err'); } };
+  const cards = ANN_DESTS.map(k => {
+    const def = R.getDestination(k); const gen = R.generateContent(ml, k); const p = pm.get(k);
+    const c = p && p.edited ? { ...gen, body: p.body ?? gen.body, hashtags: p.hashtags ?? gen.hashtags } : gen;
+    const st = p?.status || 'notStarted'; const chk = R.checkText(k, c); const sns = ['instagram', 'x', 'tiktok', 'youtube'].includes(k);
+    const full = R.composeText(k, c);
+    const body = h('textarea', { rows: 9, class: 'area', autocomplete: 'off', readonly: sns ? null : true }); body.value = sns ? (c.body || '') : full;
+    const tags = sns ? h('input', { type: 'text', autocomplete: 'off', value: c.hashtags || '' }) : null;
+    if (sns) body.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
+    if (tags) tags.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
+    const sel = h('select', { class: 'sel', onchange: e => save(k, { status: e.target.value, history: [...(p?.history || []), { at: new Date().toISOString(), status: e.target.value, by: state.by || null }].slice(-30) }) }, ANN_STATUS.map(s => h('option', { value: s, selected: s === st ? true : null }, R.STATUS[s].label)));
+    return h('details', { class: 'card ann' },
+      h('summary', {}, h('b', {}, def.name), ' ', h('i', { class: 'tag ' + (st === 'manualDone' ? 'ok' : st === 'skipped' ? 'dead' : 'mid') }, R.STATUS[st].label), p?.edited ? h('i', { class: 'tag' }, '編集済み') : null),
+      k === 'youtube' || k === 'wordpress' || k === 'googleForm' ? h('div', { class: 'lsub' }, 'タイトル: ' + (c.title || '')) : null,
+      body, tags ? field('ハッシュタグ', tags) : null,
+      h('div', { class: 'lsub' }, chk.counters.map(x => `${x.label} ${x.value}/${x.max}`).join(' ・ ')),
+      ...chk.issues.map(i => h('div', { class: 'lsub', style: i.level === 'error' ? 'color:#c0392b' : '' }, (i.level === 'error' ? '⚠️ ' : 'ℹ️ ') + i.msg)),
+      h('div', { class: 'row', style: 'margin-top:8px;gap:8px;flex-wrap:wrap' },
+        h('button', { class: 'btn small', onclick: () => copy(full) }, '📋 コピー'),
+        k === 'youtube' && c.title ? h('button', { class: 'btn small ghost', onclick: () => copy(c.title) }, 'タイトルをコピー') : null,
+        def.openUrl ? h('a', { class: 'btn small ghost', href: def.openUrl, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '開く') : null,
+        p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
+      h('div', { style: 'margin-top:8px' }, sel));
+  });
+  return h('section', { class: 'card' }, h('div', { class: 'cap' }, '📝 投稿先ごとの文章と進行'),
+    h('p', { class: 'hint' }, '上の情報から、投稿先ごとの文章を自動で作ります。コピーして各サービスに貼り、投稿したら状態を「手動で完了」にしてください。'),
+    block ? h('p', { class: 'hint', style: 'color:#c0392b' }, '⚠️ ' + block) : null, ...cards,
+    conf ? null : h('button', { class: 'btn small ghost', style: 'margin-top:10px', onclick: () => annModal(l, info, reload) }, '✏️ 告知の追加情報(特典・出店・見出しなど)'));
+}
 const liveTabs = new Map();
 const LIVE_FIELDS = {
   official_title: ['正式なライブ名', 'text'], open_time: ['開場(例 18:00)', 'text'], start_time: ['開演(例 18:30)', 'text'], end_time: ['終演(例 22:00)', 'text'],
@@ -1076,6 +1147,7 @@ async function liveView(id) {
         try { await api.setLiveStatus(id, { confirm: !conf, by: state.by, score: { profit: l.profit, income: l.income, expense: l.expense, rating: lab, merch_sales: airSales, baskets: myAb.length, avg_basket: myAb.length ? Math.round(airSales / myAb.length) : 0 } }); toast(conf ? '確定を解除しました' : '確定しました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
       } }, conf ? '確定を解除' : '✅ このライブを確定する')];
     const info = await api.liveInfo(id).catch(() => ({}));
+    const posts = await api.livePosts(id).catch(() => []);
     const files = await api.liveFiles(id).catch(() => []);
     const [songs, slItems, slRows] = await Promise.all([api.songs().catch(() => []), api.setlist(id).catch(() => []), api.liveSetlists().catch(() => [])]);
     const furl = new Map(await Promise.all(files.map(async f => [f.id, await api.liveFileUrl(f.path).catch(() => null)])));
@@ -1092,9 +1164,7 @@ async function liveView(id) {
           info.performers ? h('div', {}, h('div', { class: 'cap sec' }, '出演者'), lines(info.performers)) : null,
           info.reserve_url ? h('a', { class: 'btn small ghost', style: 'display:inline-block;margin-top:8px', href: info.reserve_url, target: '_blank', rel: 'noopener' }, '取り置きフォームを開く') : null,
           editBtn('告知の情報', ['official_title', 'open_time', 'start_time', 'end_time', 'ticket_price', 'performers', 'reserve_url'])),
-        sec('📝 告知文', h('p', { class: 'hint' }, '上の情報から、投稿用の文章を作ります。コピーして、各SNSに貼ってください。'),
-          lines(announce()),
-          h('button', { class: 'btn big', style: 'width:100%;margin-top:10px', onclick: async () => { try { await navigator.clipboard.writeText(announce()); toast('コピーしました', 'ok'); } catch { toast('コピーできませんでした。文章を長押ししてコピーしてください', 'err'); } } }, '📋 告知文をコピー'))],
+        announcePane(l, info, conf, posts, reload)],
       day: () => [
         sec('🕐 当日のタイムテーブル', timeText ? h('div', { class: 'lsub' }, timeText) : null,
           info.set_time ? h('div', { class: 'lsub' }, '🎸 演奏 ' + info.set_time) : null,

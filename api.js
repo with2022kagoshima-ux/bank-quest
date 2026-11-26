@@ -324,9 +324,11 @@ const real = {
   },
   async saveVenueEmail(venueId, email) { await rest(`venues?id=eq.${venueId}`, { method: 'PATCH', prefer: 'return=minimal', body: { email } }); },
   async liveInfo(id) {
-    const r = await rest(`lives?select=official_title,open_time,start_time,end_time,set_time,setlist_head,performers,ticket_price,reserve_url,timetable,reflection,video_url&id=eq.${id}`);
+    const r = await rest(`lives?select=official_title,open_time,start_time,end_time,set_time,setlist_head,performers,ticket_price,reserve_url,timetable,reflection,video_url,ann&id=eq.${id}`);
     return r[0] || {};
   },
+  async livePosts(liveId) { return rest(`live_posts?select=dest,status,body,hashtags,edited,history&live_id=eq.${liveId}`); },
+  async saveLivePost(liveId, dest, patch, by) { await rest('live_posts?on_conflict=live_id,dest', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: { live_id: liveId, dest, ...patch, updated_by: by || null, updated_at: new Date().toISOString() } }); },
   async saveLiveInfo(id, patch) { await rest(`lives?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: patch }); },
   async lives() {
     const [rows, vs, ls] = await Promise.all([
@@ -443,7 +445,8 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]], { air_type1_role: 'color', air_type2_role: 'size' });
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5, air_type1_role: 'size', air_type2_role: null });
-  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = []; const LF = []; const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, aliases: 'with', notes: null, duration_sec: 215, is_active: true }, { id: 's2', title: 'ゼロ', kind: 'original', artist: null, aliases: null, notes: null, duration_sec: 190, is_active: true }, { id: 's3', title: '残響', kind: 'original', artist: null, aliases: 'zankyo', notes: null, duration_sec: 240, is_active: true }]; const SI = [];
+  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = []; const LF = []; const LP = [];
+const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, aliases: 'with', notes: null, duration_sec: 215, is_active: true }, { id: 's2', title: 'ゼロ', kind: 'original', artist: null, aliases: null, notes: null, duration_sec: 190, is_active: true }, { id: 's3', title: '残響', kind: 'original', artist: null, aliases: 'zankyo', notes: null, duration_sec: 240, is_active: true }]; const SI = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -487,7 +490,9 @@ function makeDemo() {
     async liveFileUrl(path) { return path; },
     async removeLiveFile(f) { await wait(); const i = LF.findIndex(x => x.id === f.id); if (i >= 0) LF.splice(i, 1); },
     async saveVenueEmail() { await wait(); },
-    async liveInfo(id) { await wait(); const l = LV.find(x => x.id === id) || {}; return { official_title: l.official_title || 'ハロウィン後夜祭「音で化けろ」', open_time: l.open_time || '14:30', start_time: l.start_time || '15:00', end_time: l.end_time || '', set_time: l.set_time || '40min (19:30〜20:10)', ticket_price: l.ticket_price || 'ADV ¥3,000 / DOOR ¥3,500 +1D', performers: l.performers || 'DOZEONE\nHOW\nWiθ（鹿児島）', reserve_url: l.reserve_url || '', timetable: l.timetable || '', reflection: l.reflection || '', video_url: l.video_url || '' }; },
+    async liveInfo(id) { await wait(); const l = LV.find(x => x.id === id) || {}; return { official_title: l.official_title || 'ハロウィン後夜祭「音で化けろ」', open_time: l.open_time || '14:30', start_time: l.start_time || '15:00', end_time: l.end_time || '', set_time: l.set_time || '40min (19:30〜20:10)', ticket_price: l.ticket_price || 'ADV ¥3,000 / DOOR ¥3,500 +1D', performers: l.performers || 'DOZEONE\nHOW\nWiθ（鹿児島）', reserve_url: l.reserve_url || '', timetable: l.timetable || '', reflection: l.reflection || '', video_url: l.video_url || '', ann: l.ann || null }; },
+    async livePosts(liveId) { await wait(); return LP.filter(x => x.live_id === liveId).map(x => ({ ...x })); },
+    async saveLivePost(liveId, dest, patch) { await wait(); const o = LP.find(x => x.live_id === liveId && x.dest === dest); if (o) Object.assign(o, patch); else LP.push({ live_id: liveId, dest, status: 'notStarted', edited: false, history: [], ...patch }); },
     async saveLiveInfo(id, patch) { await wait(); Object.assign(LV.find(x => x.id === id) || {}, patch); },
     async lives() {
       await wait();

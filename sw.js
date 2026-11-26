@@ -1,7 +1,7 @@
 // 画面ファイルだけをキャッシュする(データ通信は一切キャッシュしない)。
 // ネット優先: 更新はすぐ反映され、電波が無いときは前回の画面を出す。
-const CACHE = 'withi-money-v46';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'api.js', 'air.js', 'config.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'withi-money-v47';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'api.js', 'air.js', 'rules.js', 'config.js', 'manifest.webmanifest', 'icon.svg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
