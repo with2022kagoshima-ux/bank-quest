@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=55';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=56';
 import * as R from './rules.js?v=50';
 import { squareMaker, storyMaker } from './snsmk.js?v=50';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-55'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-56'),
   ]);
 }
 
@@ -1062,6 +1062,24 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
+  const sendX = async (c, p, bodyEl, tagsEl) => {
+    if (block) { toast(block, 'err'); return; }
+    const text = R.composeText('x', { ...c, body: bodyEl.value, hashtags: tagsEl ? tagsEl.value : c.hashtags });
+    const fl = [...(files || [])].reverse().find(f => f.kind === 'square' && /^image\//.test(f.mime || '')) || (files || []).find(f => f.kind === 'flyer' && /^image\//.test(f.mime || ''));
+    if (!(await confirmBox('Xに投稿しますか？', 'すぐに公開されます(取り消しはXで行います)。\n画像: ' + (fl ? (fl.name || (fl.kind === 'square' ? '正方形' : 'フライヤー')) : 'なし') + '\n\n' + text.slice(0, 200) + (text.length > 200 ? '…' : ''), '投稿する'))) return;
+    try {
+      let image;
+      if (fl) {
+        const bl = await (await fetch(furl.get(fl.id))).blob();
+        const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
+        image = { name: fl.kind === 'square' ? 'square.jpg' : 'flyer.jpg', mime: fl.mime, b64 };
+      }
+      const j = await api.xpost({ action: 'post', text, image });
+      const hist = [...(p?.history || []), { at: new Date().toISOString(), status: 'success', url: j.url, id: j.id || '', by: state.by || null }].slice(-30);
+      await api.saveLivePost(l.id, 'x', { status: 'success', history: hist }, state.by);
+      toast(j.message, 'ok'); reload();
+    } catch (e) { toast(errMsg(e), 'err'); }
+  };
   const cards = ANN_DESTS.map(k => {
     const def = R.getDestination(k); const gen = R.generateContent(ml, k); const p = pm.get(k);
     const c = p && p.edited ? { ...gen, body: p.body ?? gen.body, hashtags: p.hashtags ?? gen.hashtags } : gen;
@@ -1088,8 +1106,11 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.gforms({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
+        k === 'x' && !conf ? h('button', { class: 'btn small', onclick: () => sendX(c, p, body, tags) }, '𝕏 に投稿する') : null,
+        k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.xpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Xと連携する') : null,
+        k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.xpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
-      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
+      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
   });
   return h('section', { class: 'card' }, h('div', { class: 'cap' }, '📝 投稿先ごとの文章と進行'),
@@ -2037,6 +2058,10 @@ async function route() {
       catch (e) { toast(errMsg(e), 'err'); }
       return baseView();
     } }
+  { const sp = new URLSearchParams(location.search); const xx = sp.get('x');
+    if (xx) { history.replaceState(null, '', location.pathname + location.hash);
+      const XM = { ok: ['Xと連携できました', 'ok'], denied: ['Xでの許可がキャンセルされました', 'err'], expired: ['連携の有効時間が切れました。もう一度「Xと連携する」を押してください', 'err'], norefresh: ['Xから連携用の情報を受け取れませんでした。もう一度お試しください', 'err'] };
+      const m3 = XM[xx] || ['Xとの連携でエラーが発生しました', 'err']; toast(m3[0], m3[1]); } }
   { const sp = new URLSearchParams(location.search); const gg = sp.get('google');
     if (gg) { history.replaceState(null, '', location.pathname + location.hash);
       const GM = { ok: ['Googleと連携できました', 'ok'], denied: ['Googleでの許可がキャンセルされました', 'err'], expired: ['連携の有効時間が切れました。もう一度「Googleと連携する」を押してください', 'err'], norefresh: ['Googleから連携用の情報を受け取れませんでした。もう一度お試しください', 'err'] };
