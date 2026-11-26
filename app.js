@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-50'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-51'),
   ]);
 }
 
@@ -1036,7 +1036,8 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       if (fl) {
         const bl = await (await fetch(furl.get(fl.id))).blob();
         const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
-        image = { name: fl.name || 'flyer.jpg', mime: fl.mime, b64 };
+        const hx = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await bl.arrayBuffer()))).slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join('');
+        image = { name: 'flyer-' + hx + (fl.mime === 'image/png' ? '.png' : '.jpg'), mime: fl.mime, b64 };
       }
       const j = await api.wpPublish({ title: c.title, content: c.body, publish, kind: 'live', image });
       const hist = [...(p?.history || []), { at: new Date().toISOString(), status: j.status === 'publish' ? 'success' : 'draft', url: j.url, id: j.id, by: state.by || null }].slice(-30);
