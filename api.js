@@ -399,6 +399,16 @@ const real = {
     if (!r.ok) throw new ApiError(j.error || 'BASE連携でエラーが発生しました', 'api');
     return j;
   },
+  async wpPublish(body) {
+    const s = await freshSession();
+    let r;
+    try { r = await fetch(`${C.url}/functions/v1/wp-publish`, { method: 'POST', headers: { apikey: C.key, Authorization: `Bearer ${s.access}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+    catch { throw new ApiError('通信できません。電波のある場所でもう一度お試しください。', 'net'); }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 404) throw new ApiError('公式サイト連携の中継(Edge Function)がまだ設置されていません', 'api');
+    if (!j.ok) throw new ApiError(j.message || '公式サイトへの送信でエラーが発生しました', 'api');
+    return j;
+  },
   baseMaps: () => rest('base_item_map?select=variant_id,base_item_id,base_variation_id,base_label,baseline,synced_at'),
   baseLog: () => rest('base_sync_log?select=run_at,run_by,ok,failed,lines&order=run_at.desc&limit=10'),
 };
@@ -592,6 +602,7 @@ const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, alia
     async addProduct(f) { await wait(); mkp(f.name, f.category || null, [[f.size || null, f.color || null, f.price, f.cost, 0]]); },
     async stockMove(m) { await wait(); const o = PR.flatMap(x => x.vars).find(x => x.id === m.variant_id); o.stock += m.qty; MV.unshift({ variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo }); },
     async stockHistory(vid) { await wait(); return MV.filter(x => x.variant_id === vid); },
+    async wpPublish(b) { await wait(); return b.check ? { ok: true, message: 'WordPress「デモ」として接続できました' } : { ok: true, id: '1', status: b.publish ? 'publish' : 'draft', url: 'https://example.com/?p=1', message: b.publish ? '公式サイトに公開しました(デモ)' : '公式サイトに下書きを作成しました(デモ)' }; },
     async baseSync(action) {
       await wait();
       if (action === 'status') return { configured: true, connected: true, shop_name: 'デモショップ', mapped: 0 };

@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=47';
-import * as R from './rules.js?v=47';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=47';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=48';
+import * as R from './rules.js?v=48';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=48';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -204,7 +204,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-47'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-48'),
   ]);
 }
 
@@ -970,7 +970,7 @@ const ANN_FIELDS = [
   ['actLabel', '出演者の見出し(未設定はACT)', 'text'], ['shopLabel', '出店の見出し(未設定はSHOP)', 'text'],
 ];
 const ANN_DESTS = ['instagram', 'x', 'tiktok', 'youtube', 'wordpress', 'googleForm', 'bandsintown'];
-const ANN_STATUS = ['notStarted', 'draft', 'manualPending', 'manualDone', 'skipped'];
+const ANN_STATUS = ['notStarted', 'draft', 'manualPending', 'manualDone', 'success', 'skipped'];
 function mkAnnLive(l, info) {
   const a = info.ann || {};
   const o = {
@@ -1004,6 +1004,17 @@ function announcePane(l, info, conf, posts, reload) {
   const block = R.publishBlockReason(ml);
   const copy = async t => { try { await navigator.clipboard.writeText(t); toast('コピーしました', 'ok'); } catch { toast('コピーできませんでした。文章を長押ししてコピーしてください', 'err'); } };
   const save = async (k, patch) => { try { await api.saveLivePost(l.id, k, patch, state.by); reload(); } catch (e) { toast(errMsg(e), 'err'); } };
+  const sendWp = async (c, p, publish) => {
+    if (block) { toast(block, 'err'); return; }
+    const ok = await confirmBox(publish ? '公式サイトに公開しますか？' : '公式サイトに下書きを送りますか？', (publish ? '公開すると、すぐに公式サイトに表示されます。' : '下書きとして作成します(公開はされません)。同じタイトルの投稿があれば、その内容を更新します。') + '\nタイトル: ' + (c.title || ''), publish ? '公開する' : '下書きを送る');
+    if (!ok) return;
+    try {
+      const j = await api.wpPublish({ title: c.title, content: c.body, publish, kind: 'live' });
+      const hist = [...(p?.history || []), { at: new Date().toISOString(), status: j.status === 'publish' ? 'success' : 'draft', url: j.url, id: j.id, by: state.by || null }].slice(-30);
+      await api.saveLivePost(l.id, 'wordpress', { status: j.status === 'publish' ? 'success' : 'draft', history: hist }, state.by);
+      toast(j.message, 'ok'); reload();
+    } catch (e) { toast(errMsg(e), 'err'); }
+  };
   const cards = ANN_DESTS.map(k => {
     const def = R.getDestination(k); const gen = R.generateContent(ml, k); const p = pm.get(k);
     const c = p && p.edited ? { ...gen, body: p.body ?? gen.body, hashtags: p.hashtags ?? gen.hashtags } : gen;
@@ -1024,7 +1035,11 @@ function announcePane(l, info, conf, posts, reload) {
         h('button', { class: 'btn small', onclick: () => copy(full) }, '📋 コピー'),
         k === 'youtube' && c.title ? h('button', { class: 'btn small ghost', onclick: () => copy(c.title) }, 'タイトルをコピー') : null,
         def.openUrl ? h('a', { class: 'btn small ghost', href: def.openUrl, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '開く') : null,
+        k === 'wordpress' && !conf ? h('button', { class: 'btn small', onclick: () => sendWp(c, p, false) }, '🌐 下書きを送る') : null,
+        k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => sendWp(c, p, true) }, '公開して送る') : null,
+        k === 'wordpress' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.wpPublish({ check: true })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
+      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && k === 'wordpress' ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
   });
   return h('section', { class: 'card' }, h('div', { class: 'cap' }, '📝 投稿先ごとの文章と進行'),
