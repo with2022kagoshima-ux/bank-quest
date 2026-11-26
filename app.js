@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=42';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=42';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=43';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=43';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-42'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-43'),
   ]);
 }
 
@@ -1223,6 +1223,7 @@ async function songsView() {
 // ---------- セットリストの書き出し(画像・PDF) ----------
 const WD = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 function slHeaderDefault(l, info) {
+  if (info && info.setlist_head) return info.setlist_head;
   const [y, m, d] = String(l.live_date).slice(0, 10).split('-').map(Number);
   const wd = WD[new Date(y, m - 1, d).getDay()];
   const place = [l.prefecture, l.venue_name].filter(Boolean).join(' ');
@@ -1258,7 +1259,7 @@ async function renderSetlist(headLines, entries) {
   y += 50;
   let fs = 48;
   const lhOf = f => f * 1.55, gapOf = f => f * 1.2;
-  const need = f => entries.reduce((s, e) => s + (e.gap ? gapOf(f) : lhOf(f)) + (e.note ? f * 0.9 : 0), 0);
+  const need = f => entries.reduce((s, e) => s + (e.gap ? gapOf(f) : lhOf(f)) + (e.note ? lhOf(f) * 0.85 : 0), 0);
   const avail = H - y - 110;
   while (need(fs) > avail && fs > 24) fs -= 2;
   const lh = lhOf(fs), gap = gapOf(fs);
@@ -1268,7 +1269,7 @@ async function renderSetlist(headLines, entries) {
     y += lh;
     if (e.no != null) { g.textAlign = 'right'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.no + '.', xn, y); }
     g.textAlign = 'left'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.text, xt, y);
-    if (e.note) { y += fs * 0.9; g.font = `700 ${Math.round(fs * 0.8)}px ${FONT}`; g.fillText(e.note, xt, y); }
+    if (e.note) { y += lh * 0.85; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.note, xt, y); }
   }
   return c;
 }
@@ -1304,13 +1305,11 @@ function saveBlob(blob, name) {
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
 }
 function exportSetlistModal(l, info, items, byId) {
-  const key = 'slhead:' + l.id;
-  let init = ''; try { init = localStorage.getItem(key) || ''; } catch {}
-  const ta = h('textarea', { class: 'area', rows: 5 }); ta.value = init || slHeaderDefault(l, info);
+  const ta = h('textarea', { class: 'area', rows: 6 }); ta.value = slHeaderDefault(l, info);
   const prev = h('div', { class: 'hint' }, '');
   const fname = ext => `セトリ_${String(l.live_date).slice(0, 10)}_${(l.venue_name || '').replace(/[\\/:*?"<>|\s]/g, '')}.${ext}`;
   const build = async () => {
-    try { localStorage.setItem(key, ta.value); } catch {}
+    if (ta.value.trim() !== (info.setlist_head || '').trim()) { info.setlist_head = ta.value.trim(); api.saveLiveInfo(l.id, { setlist_head: info.setlist_head || null }).catch(() => {}); }
     return renderSetlist(ta.value.split('\n').map(x => x.trim()).filter(Boolean), slEntries(items, byId));
   };
   const m = modal([

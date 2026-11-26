@@ -324,7 +324,7 @@ const real = {
   },
   async saveVenueEmail(venueId, email) { await rest(`venues?id=eq.${venueId}`, { method: 'PATCH', prefer: 'return=minimal', body: { email } }); },
   async liveInfo(id) {
-    const r = await rest(`lives?select=official_title,open_time,start_time,end_time,set_time,performers,ticket_price,reserve_url,timetable,reflection,video_url&id=eq.${id}`);
+    const r = await rest(`lives?select=official_title,open_time,start_time,end_time,set_time,setlist_head,performers,ticket_price,reserve_url,timetable,reflection,video_url&id=eq.${id}`);
     return r[0] || {};
   },
   async saveLiveInfo(id, patch) { await rest(`lives?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: patch }); },
