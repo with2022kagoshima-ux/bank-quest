@@ -1,7 +1,8 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=49';
-import * as R from './rules.js?v=49';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=49';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=50';
+import * as R from './rules.js?v=50';
+import { squareMaker, storyMaker } from './snsmk.js?v=50';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -204,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-49'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-50'),
   ]);
 }
 
@@ -998,6 +999,27 @@ function annModal(l, info, done) {
   const m = modal([h('h3', {}, '✏️ 告知の追加情報'), h('p', { class: 'hint' }, '正式名・時間・料金・出演者・予約URLは、上の「告知の情報」にあります。'), ...els.map(([k, el, label]) => field(label, el)),
     h('label', { class: 'chk' }, pr, ' 本文に「予約はプロフィールのリンク or DMから」を入れる'), msg, ok]);
 }
+function snsImageSec(l, info, conf, files, furl, reload) {
+  const fl = files.find(f => f.kind === 'flyer' && /^image\//.test(f.mime || ''));
+  const sqf = [...files].reverse().find(f => f.kind === 'square');
+  const ui = { h, modal, toast };
+  const ml = mkAnnLive(l, info);
+  const ensureBy = async () => { if (!state.by) await pickBy(true); return !!state.by; };
+  const save = (kind, nm) => async (f) => { if (!(await ensureBy())) throw new Error('だれの操作か選んでください'); await api.addLiveFile(l.id, kind, f, state.by); toast('保存しました', 'ok'); reload(); };
+  const btn = (label, fn) => h('button', { type: 'button', class: 'btn ghost small', onclick: fn }, label);
+  const date = String(l.live_date || '').slice(0, 10);
+  const sec = (title, ...els) => h('section', { class: 'card' }, h('div', { class: 'cap' }, title), ...els);
+  return sec('🎨 SNS用の画像',
+    fl ? null : h('p', { class: 'empty' }, '先にフライヤー画像を追加すると、ここから正方形やストーリーの画像を作れます。'),
+    fl && !conf ? h('div', { class: 'with-btn', style: 'gap:8px;flex-wrap:wrap' },
+      btn('🟦 正方形を作る', () => squareMaker(ui, furl.get(fl.id), '正方形.jpg', save('square'))),
+      btn('📱 ストーリー下地を作る', () => storyMaker(ui, furl.get(fl.id), sqf ? furl.get(sqf.id) : null, {
+        ymd: date,
+        def: { head: R.snsHeadOf(ml) || '【LIVE INFO】', title: ml.title, date: R.fmtDateShort(date), venue: R.venuePlainName(ml), performers: R.performersOf(ml), ticket: ml.ticketPrice || '', drink: ml.drinkFee || '' },
+      }, 'ストーリー.jpg', save('story')))) : null,
+    files.some(f => f.kind === 'square') ? h('div', {}, h('div', { class: 'cap sec' }, '正方形'), liveFileBlock(l, files, furl, 'square', true, reload)) : null,
+    files.some(f => f.kind === 'story') ? h('div', {}, h('div', { class: 'cap sec' }, 'ストーリー'), liveFileBlock(l, files, furl, 'story', true, reload)) : null);
+}
 function announcePane(l, info, conf, posts, reload, files, furl) {
   const ml = mkAnnLive(l, info);
   const pm = new Map(posts.map(p => [p.dest, p]));
@@ -1188,6 +1210,7 @@ async function liveView(id) {
           editBtn('告知の情報', ['official_title', 'open_time', 'start_time', 'end_time', 'ticket_price', 'performers', 'reserve_url'])),
         sec('🖼 フライヤー画像', files.some(f => f.kind === 'flyer') ? null : h('p', { class: 'empty' }, 'フライヤーの画像を追加すると、公式サイトに送るときに本文と一緒に入ります。'),
           liveFileBlock(l, files, furl, 'flyer', conf, reload)),
+        snsImageSec(l, info, conf, files, furl, reload),
         announcePane(l, info, conf, posts, reload, files, furl)],
       day: () => [
         sec('🕐 当日のタイムテーブル', timeText ? h('div', { class: 'lsub' }, timeText) : null,
