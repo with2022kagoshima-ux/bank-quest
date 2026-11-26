@@ -324,7 +324,7 @@ const real = {
   },
   async saveVenueEmail(venueId, email) { await rest(`venues?id=eq.${venueId}`, { method: 'PATCH', prefer: 'return=minimal', body: { email } }); },
   async liveInfo(id) {
-    const r = await rest(`lives?select=official_title,open_time,start_time,end_time,performers,ticket_price,reserve_url,timetable,reflection,video_url&id=eq.${id}`);
+    const r = await rest(`lives?select=official_title,open_time,start_time,end_time,set_time,performers,ticket_price,reserve_url,timetable,reflection,video_url&id=eq.${id}`);
     return r[0] || {};
   },
   async saveLiveInfo(id, patch) { await rest(`lives?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: patch }); },
@@ -487,7 +487,7 @@ function makeDemo() {
     async liveFileUrl(path) { return path; },
     async removeLiveFile(f) { await wait(); const i = LF.findIndex(x => x.id === f.id); if (i >= 0) LF.splice(i, 1); },
     async saveVenueEmail() { await wait(); },
-    async liveInfo(id) { await wait(); const l = LV.find(x => x.id === id) || {}; return { official_title: l.official_title || 'ハロウィン後夜祭「音で化けろ」', open_time: l.open_time || '14:30', start_time: l.start_time || '15:00', end_time: l.end_time || '', ticket_price: l.ticket_price || 'ADV ¥3,000 / DOOR ¥3,500 +1D', performers: l.performers || 'DOZEONE\nHOW\nWiθ（鹿児島）', reserve_url: l.reserve_url || '', timetable: l.timetable || '', reflection: l.reflection || '', video_url: l.video_url || '' }; },
+    async liveInfo(id) { await wait(); const l = LV.find(x => x.id === id) || {}; return { official_title: l.official_title || 'ハロウィン後夜祭「音で化けろ」', open_time: l.open_time || '14:30', start_time: l.start_time || '15:00', end_time: l.end_time || '', set_time: l.set_time || '40min (19:30〜20:10)', ticket_price: l.ticket_price || 'ADV ¥3,000 / DOOR ¥3,500 +1D', performers: l.performers || 'DOZEONE\nHOW\nWiθ（鹿児島）', reserve_url: l.reserve_url || '', timetable: l.timetable || '', reflection: l.reflection || '', video_url: l.video_url || '' }; },
     async saveLiveInfo(id, patch) { await wait(); Object.assign(LV.find(x => x.id === id) || {}, patch); },
     async lives() {
       await wait();

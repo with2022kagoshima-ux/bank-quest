@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=41';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=41';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=42';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=42';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-41'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-42'),
   ]);
 }
 
@@ -965,7 +965,7 @@ const liveTabs = new Map();
 const LIVE_FIELDS = {
   official_title: ['正式なライブ名', 'text'], open_time: ['開場(例 18:00)', 'text'], start_time: ['開演(例 18:30)', 'text'], end_time: ['終演(例 22:00)', 'text'],
   ticket_price: ['チケット料金', 'text'], performers: ['出演者(1行に1組)', 'area'], reserve_url: ['取り置き・予約フォームのURL', 'text'],
-  timetable: ['タイムテーブル(例: 14:00 搬入 / 16:30 リハ / 18:50 本番)', 'area'], reflection: ['反省・振り返り', 'area'], video_url: ['映像のリンク(YouTube限定公開・ドライブなど)', 'text'],
+  set_time: ['演奏時間(例 40min (19:30〜20:10))', 'text'], timetable: ['タイムテーブル(例: 14:00 搬入 / 16:30 リハ / 18:50 本番)', 'area'], reflection: ['反省・振り返り', 'area'], video_url: ['映像のリンク(YouTube限定公開・ドライブなど)', 'text'],
 };
 function liveInfoModal(live, info, title, keys, done) {
   const els = keys.map(k => { const [label, type] = LIVE_FIELDS[k];
@@ -1097,9 +1097,10 @@ async function liveView(id) {
           h('button', { class: 'btn big', style: 'width:100%;margin-top:10px', onclick: async () => { try { await navigator.clipboard.writeText(announce()); toast('コピーしました', 'ok'); } catch { toast('コピーできませんでした。文章を長押ししてコピーしてください', 'err'); } } }, '📋 告知文をコピー'))],
       day: () => [
         sec('🕐 当日のタイムテーブル', timeText ? h('div', { class: 'lsub' }, timeText) : null,
+          info.set_time ? h('div', { class: 'lsub' }, '🎸 演奏 ' + info.set_time) : null,
           info.timetable ? lines(info.timetable) : (files.some(f => f.kind === 'timetable') ? null : h('p', { class: 'empty' }, 'まだ入力されていません。文字で書くか、会場から届いたPDF・画像を追加してください。')),
           liveFileBlock(l, files, furl, 'timetable', conf, reload),
-          editBtn('当日のタイムテーブル', ['timetable'])),
+          editBtn('当日のタイムテーブル', ['set_time', 'timetable'])),
         sec('🎛 セット図', files.some(f => f.kind === 'stageplot') ? null : h('p', { class: 'empty' }, 'セット図の画像・PDFを追加してください。'),
           liveFileBlock(l, files, furl, 'stageplot', conf, reload)),
         sec('✉️ ライブハウスに提出', h('div', { class: 'lsub' }, (l.venue_name || '会場未設定') + (l.venue_email ? ' ・ ' + l.venue_email : ' ・ メールアドレス未登録')),
@@ -1225,9 +1226,23 @@ function slHeaderDefault(l, info) {
   const [y, m, d] = String(l.live_date).slice(0, 10).split('-').map(Number);
   const wd = WD[new Date(y, m - 1, d).getDay()];
   const place = [l.prefecture, l.venue_name].filter(Boolean).join(' ');
-  return [`${y}/${m}/${d} ${wd} @${place}`, (info && info.official_title) || l.event_name].filter(Boolean).join('\n');
+  return [`${y}/${m}/${d} ${wd} @${place}`, (info && info.official_title) || l.event_name, info && info.set_time].filter(Boolean).join('\n');
 }
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+function wrapHead(g, text, maxW) {
+  const w = t => g.measureText(t).width;
+  if (w(text) <= maxW) return [text];
+  const sp = []; for (let i = 0; i < text.length; i++) if (text[i] === ' ') sp.push(i);
+  let cut = -1;
+  const kw = /(pre\.|presents?)\s/ig; let m;
+  while ((m = kw.exec(text))) { const i = m.index + m[1].length; if (w(text.slice(0, i)) <= maxW && i < text.length - 1) { cut = i; break; } }
+  if (cut < 0) {
+    let best = Infinity;
+    for (const i of sp) { const l = w(text.slice(0, i)), r = w(text.slice(i + 1)); if (l <= maxW && Math.abs(l - r) < best) { best = Math.abs(l - r); cut = i; } }
+  }
+  if (cut < 0) { let i = 1; while (i < text.length && w(text.slice(0, i + 1)) <= maxW) i++; cut = i; return [text.slice(0, cut), ...wrapHead(g, text.slice(cut), maxW)]; }
+  return [text.slice(0, cut).trim(), ...wrapHead(g, text.slice(cut).trim(), maxW)];
+}
 async function renderSetlist(headLines, entries) {
   const W = 1240, H = 1754, c = document.createElement('canvas');
   c.width = W; c.height = H;
@@ -1235,24 +1250,25 @@ async function renderSetlist(headLines, entries) {
   g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
   g.fillStyle = '#000'; g.textBaseline = 'alphabetic';
   const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif';
-  let y = 90;
-  try { const im = await loadImg('logo-wi.png?v=41'); const lw = 380, lh = lw * im.height / im.width; g.drawImage(im, (W - lw) / 2, y, lw, lh); y += lh + 50; } catch { y += 40; }
+  let y = 80;
+  try { const im = await loadImg('logo-wi.png?v=41'); const lw = 270, lh = lw * im.height / im.width; g.drawImage(im, (W - lw) / 2, y, lw, lh); y += lh + 30; } catch { y += 30; }
   g.textAlign = 'center'; g.font = `700 30px ${FONT}`;
-  for (const t of headLines) { y += 42; g.fillText(t, W / 2, y); }
-  y += 70;
-  const rows = entries.length;
-  let fs = 54, lh = 72, gap = 46, note = 0;
-  const need = (f) => entries.reduce((s, e) => s + (e.gap ? f * 0.85 : f * 1.33) + (e.note ? f * 0.85 : 0), 0);
+  const lines = headLines.flatMap(t => wrapHead(g, t, W - 220));
+  for (const t of lines) { y += 52; g.fillText(t, W / 2, y); }
+  y += 50;
+  let fs = 48;
+  const lhOf = f => f * 1.55, gapOf = f => f * 1.2;
+  const need = f => entries.reduce((s, e) => s + (e.gap ? gapOf(f) : lhOf(f)) + (e.note ? f * 0.9 : 0), 0);
   const avail = H - y - 110;
   while (need(fs) > avail && fs > 24) fs -= 2;
-  lh = fs * 1.33; gap = fs * 0.85;
-  g.textAlign = 'right'; const xn = 255, xt = 290;
+  const lh = lhOf(fs), gap = gapOf(fs);
+  const xn = 225, xt = 250;
   for (const e of entries) {
     if (e.gap) { y += gap; continue; }
     y += lh;
     if (e.no != null) { g.textAlign = 'right'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.no + '.', xn, y); }
     g.textAlign = 'left'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.text, xt, y);
-    if (e.note) { y += fs * 0.85; g.font = `700 ${Math.round(fs * 0.8)}px ${FONT}`; g.fillText(e.note, xt, y); }
+    if (e.note) { y += fs * 0.9; g.font = `700 ${Math.round(fs * 0.8)}px ${FONT}`; g.fillText(e.note, xt, y); }
   }
   return c;
 }
