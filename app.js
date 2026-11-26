@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=35';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=35';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=36';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=36';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-35'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-36'),
   ]);
 }
 
@@ -903,6 +903,24 @@ function liveEntryModal(live, isIn, done, entry) {
     msg, ok]);
 }
 
+const liveTabs = new Map();
+const LIVE_FIELDS = {
+  official_title: ['正式なライブ名', 'text'], open_time: ['開場(例 18:00)', 'text'], start_time: ['開演(例 18:30)', 'text'], end_time: ['終演(例 22:00)', 'text'],
+  ticket_price: ['チケット料金', 'text'], performers: ['出演者(1行に1組)', 'area'], reserve_url: ['取り置き・予約フォームのURL', 'text'],
+  timetable: ['タイムテーブル(例: 14:00 搬入 / 16:30 リハ / 18:50 本番)', 'area'], reflection: ['反省・振り返り', 'area'], video_url: ['映像のリンク(YouTube限定公開・ドライブなど)', 'text'],
+};
+function liveInfoModal(live, info, title, keys, done) {
+  const els = keys.map(k => { const [label, type] = LIVE_FIELDS[k];
+    const el = type === 'area' ? h('textarea', { rows: k === 'performers' ? 8 : 7, class: 'area', autocomplete: 'off' }) : h('input', { type: 'text', autocomplete: 'off' });
+    el.value = info[k] || ''; return [k, el, label]; });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    msg.textContent = ''; ok.disabled = true;
+    try { const patch = {}; for (const [k, el] of els) patch[k] = el.value.trim() || null; await api.saveLiveInfo(live.id, patch); m.close(); toast('保存しました', 'ok'); done(); }
+    catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '保存する');
+  const m = modal([h('h3', {}, '✏️ ' + title), ...els.map(([k, el, label]) => field(label, el)), msg, ok]);
+}
 async function liveView(id) {
   const my = ++renderId;
   const body = h('div', {}, loading());
@@ -982,7 +1000,7 @@ async function liveView(id) {
       h('p', { class: 'hint' }, `このライブの日(${dshow(l.live_date)})の物販売上を、AirレジのCSVから読み込みます。日をまたいだ深夜0〜6時の会計も、一緒に取り込めます。`),
       h('button', { class: 'btn' + (myAb.length ? ' ghost' : ' big'), style: 'width:100%', onclick: () => upIn.click() }, myAb.length ? '📂 CSVを選び直す' : '📂 CSVを選んで物販売上を出す'), upIn, upBox);
     const unsettled = entries.some(r => r.posting !== 'draft' && r.kind === 'expense_advanced' && !r.reversed && !r.reverses_id);
-    body.replaceChildren(head,
+    const moneyEls = [
       conf ? h('p', { class: 'hint' }, '確定済みです。記録を足したり取り消したりするには、先に「確定を解除」してください。') : h('div', { class: 'duo' },
         h('button', { class: 'btn in', onclick: () => liveEntryModal(l, true, reload) }, '💰 収入を追加'),
         h('button', { class: 'btn out', onclick: () => liveEntryModal(l, false, reload) }, '💸 支出を追加')),
@@ -998,7 +1016,46 @@ async function liveView(id) {
         const okk = await confirmBox(conf ? '確定を解除する？' : 'このライブを確定する？', conf ? '記録を足したり取り消したりできるようになります。' : `LIVE PROFIT ${yen(l.profit)} で確定します。確定中は記録の追加・取消ができません(いつでも解除できます)。`, conf ? '解除する' : '確定する');
         if (!okk) return;
         try { await api.setLiveStatus(id, { confirm: !conf, by: state.by, score: { profit: l.profit, income: l.income, expense: l.expense, rating: lab, merch_sales: airSales, baskets: myAb.length, avg_basket: myAb.length ? Math.round(airSales / myAb.length) : 0 } }); toast(conf ? '確定を解除しました' : '確定しました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
-      } }, conf ? '確定を解除' : '✅ このライブを確定する'));
+      } }, conf ? '確定を解除' : '✅ このライブを確定する')];
+    const info = await api.liveInfo(id).catch(() => ({}));
+    const sec = (title, ...els) => h('section', { class: 'card' }, h('div', { class: 'cap' }, title), ...els);
+    const lines = t => h('p', { class: 'pre' }, t);
+    const editBtn = (label, fields) => conf ? null : h('button', { class: 'btn small ghost', style: 'margin-top:10px', onclick: () => liveInfoModal(l, info, label, fields, reload) }, '✏️ 編集');
+    const timeText = [info.open_time && 'OPEN ' + info.open_time, info.start_time && 'START ' + info.start_time, info.end_time && 'END ' + info.end_time].filter(Boolean).join(' / ');
+    const announce = () => ['【LIVE INFO】', '', info.official_title || l.event_name, `📅 ${String(l.live_date).slice(0, 10).replaceAll('-', '/')}`, `📍 ${[l.venue_name, l.prefecture].filter(Boolean).join(' ')}`, timeText && `🕐 ${timeText}`, info.ticket_price && `🎫 ${info.ticket_price}`, info.performers && '\n出演:\n' + info.performers, info.reserve_url && `\n▼取り置き・予約\n${info.reserve_url}`].filter(x => x !== '' ? x : true).filter(x => x !== null && x !== undefined && x !== false).join('\n');
+    const panes = {
+      info: () => [
+        sec('📣 告知の情報', info.official_title ? h('div', { class: 'lmemo' }, info.official_title) : h('p', { class: 'empty' }, 'まだ入力されていません。'),
+          timeText ? h('div', { class: 'lsub' }, '🕐 ' + timeText) : null,
+          info.ticket_price ? h('div', { class: 'lsub' }, '🎫 ' + info.ticket_price) : null,
+          info.performers ? h('div', {}, h('div', { class: 'cap sec' }, '出演者'), lines(info.performers)) : null,
+          info.reserve_url ? h('a', { class: 'btn small ghost', style: 'display:inline-block;margin-top:8px', href: info.reserve_url, target: '_blank', rel: 'noopener' }, '取り置きフォームを開く') : null,
+          editBtn('告知の情報', ['official_title', 'open_time', 'start_time', 'end_time', 'ticket_price', 'performers', 'reserve_url'])),
+        sec('📝 告知文', h('p', { class: 'hint' }, '上の情報から、投稿用の文章を作ります。コピーして、各SNSに貼ってください。'),
+          lines(announce()),
+          h('button', { class: 'btn big', style: 'width:100%;margin-top:10px', onclick: async () => { try { await navigator.clipboard.writeText(announce()); toast('コピーしました', 'ok'); } catch { toast('コピーできませんでした。文章を長押ししてコピーしてください', 'err'); } } }, '📋 告知文をコピー'))],
+      day: () => [
+        sec('🕐 当日のタイムテーブル', timeText ? h('div', { class: 'lsub' }, timeText) : null,
+          info.timetable ? lines(info.timetable) : h('p', { class: 'empty' }, 'まだ入力されていません。搬入・リハ・本番・物販の時間などを書いておくと、当日に全員が見られます。'),
+          editBtn('当日のタイムテーブル', ['timetable']))],
+      refl: () => [
+        sec('🔁 反省・振り返り', info.reflection ? lines(info.reflection) : h('p', { class: 'empty' }, 'まだ書かれていません。良かったこと・直したいこと・次への課題などを書いてください。'),
+          editBtn('反省・振り返り', ['reflection'])),
+        sec('🎥 全尺映像', info.video_url ? h('a', { class: 'btn big', style: 'display:block;text-align:center;text-decoration:none', href: info.video_url, target: '_blank', rel: 'noopener' }, '▶ 映像を開く') : h('p', { class: 'empty' }, 'リンクはまだありません。YouTubeの限定公開やGoogleドライブのリンクを貼ってください。'),
+          editBtn('全尺映像', ['video_url']))],
+      money: () => moneyEls,
+    };
+    const TABS = [['money', '💰 収支'], ['info', '📣 告知'], ['day', '🕐 当日'], ['refl', '🔁 反省']];
+    let tab = liveTabs.get(id) || 'money';
+    const pane = h('div', {});
+    const bar = h('div', { class: 'tabs' });
+    const draw = () => {
+      liveTabs.set(id, tab);
+      bar.replaceChildren(...TABS.map(([k, label]) => h('button', { type: 'button', class: 'tab' + (k === tab ? ' on' : ''), onclick: () => { tab = k; draw(); } }, label)));
+      pane.replaceChildren(...panes[tab]());
+    };
+    draw();
+    body.replaceChildren(head, bar, pane);
   } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, () => liveView(id))); }
 }
 

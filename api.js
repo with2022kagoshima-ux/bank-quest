@@ -289,6 +289,11 @@ const real = {
   },
   liveAirStatus: id => rest('rpc/live_air_status', { method: 'POST', body: { p_live: id } }),
   liveAirPost: (id, by) => rest('rpc/app_live_air_post', { method: 'POST', body: { p_live: id, p_by: by } }),
+  async liveInfo(id) {
+    const r = await rest(`lives?select=official_title,open_time,start_time,end_time,performers,ticket_price,reserve_url,timetable,reflection,video_url&id=eq.${id}`);
+    return r[0] || {};
+  },
+  async saveLiveInfo(id, patch) { await rest(`lives?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: patch }); },
   async lives() {
     const [rows, vs, ls] = await Promise.all([
       rest('v_live_profit?select=*&order=live_date.desc'),
@@ -437,6 +442,8 @@ function makeDemo() {
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
     async offset(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable || e.amount > b.recv) throw new ApiError(`相殺できるのは、未払い残(${b.payable}円)と借入残(${b.recv}円)の小さい方までです`); const r = add({ occurred_on: e.date, kind: 'offset', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
 
+    async liveInfo(id) { await wait(); const l = LV.find(x => x.id === id) || {}; return { official_title: l.official_title || 'ハロウィン後夜祭「音で化けろ」', open_time: l.open_time || '14:30', start_time: l.start_time || '15:00', end_time: l.end_time || '', ticket_price: l.ticket_price || 'ADV ¥3,000 / DOOR ¥3,500 +1D', performers: l.performers || 'DOZEONE\nHOW\nWiθ（鹿児島）', reserve_url: l.reserve_url || '', timetable: l.timetable || '', reflection: l.reflection || '', video_url: l.video_url || '' }; },
+    async saveLiveInfo(id, patch) { await wait(); Object.assign(LV.find(x => x.id === id) || {}, patch); },
     async lives() {
       await wait();
       return LV.map(l => { const es = E.filter(e => e.live_id === l.id); const pn = es.map(e => sign(e) * ((eff(e).pnl) || 0));
