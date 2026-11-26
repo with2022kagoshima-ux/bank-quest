@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-52'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-53'),
   ]);
 }
 
@@ -1031,7 +1031,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     const ok = await confirmBox(publish ? '公式サイトに公開しますか？' : '公式サイトに下書きを送りますか？', (publish ? '公開すると、すぐに公式サイトに表示されます。' : '下書きとして作成します(公開はされません)。同じタイトルの投稿があれば、その内容を更新します。') + '\nタイトル: ' + (c.title || ''), publish ? '公開する' : '下書きを送る');
     if (!ok) return;
     try {
-      const pr = await api.wpPublish({ title: c.title, kind: 'live', probe: true });
+      const pr = await api.wpPublish({ title: c.title, content: c.body, kind: 'live', probe: true });
       if (pr.exists && pr.status === 'publish' && !(await confirmBox('すでに公開されています', '公式サイトに同じライブのページが公開中です。このまま送ると、公開中のページの内容が書き換わります(下書きにはなりません)。', '上書きする'))) return;
     } catch (e) { toast(errMsg(e), 'err'); return; }
     try {
