@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=48';
-import * as R from './rules.js?v=48';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=48';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=49';
+import * as R from './rules.js?v=49';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=49';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -204,7 +204,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-48'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-49'),
   ]);
 }
 
@@ -998,7 +998,7 @@ function annModal(l, info, done) {
   const m = modal([h('h3', {}, '✏️ 告知の追加情報'), h('p', { class: 'hint' }, '正式名・時間・料金・出演者・予約URLは、上の「告知の情報」にあります。'), ...els.map(([k, el, label]) => field(label, el)),
     h('label', { class: 'chk' }, pr, ' 本文に「予約はプロフィールのリンク or DMから」を入れる'), msg, ok]);
 }
-function announcePane(l, info, conf, posts, reload) {
+function announcePane(l, info, conf, posts, reload, files, furl) {
   const ml = mkAnnLive(l, info);
   const pm = new Map(posts.map(p => [p.dest, p]));
   const block = R.publishBlockReason(ml);
@@ -1009,7 +1009,14 @@ function announcePane(l, info, conf, posts, reload) {
     const ok = await confirmBox(publish ? '公式サイトに公開しますか？' : '公式サイトに下書きを送りますか？', (publish ? '公開すると、すぐに公式サイトに表示されます。' : '下書きとして作成します(公開はされません)。同じタイトルの投稿があれば、その内容を更新します。') + '\nタイトル: ' + (c.title || ''), publish ? '公開する' : '下書きを送る');
     if (!ok) return;
     try {
-      const j = await api.wpPublish({ title: c.title, content: c.body, publish, kind: 'live' });
+      let image;
+      const fl = (files || []).find(f => f.kind === 'flyer' && /^image\//.test(f.mime || ''));
+      if (fl) {
+        const bl = await (await fetch(furl.get(fl.id))).blob();
+        const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
+        image = { name: fl.name || 'flyer.jpg', mime: fl.mime, b64 };
+      }
+      const j = await api.wpPublish({ title: c.title, content: c.body, publish, kind: 'live', image });
       const hist = [...(p?.history || []), { at: new Date().toISOString(), status: j.status === 'publish' ? 'success' : 'draft', url: j.url, id: j.id, by: state.by || null }].slice(-30);
       await api.saveLivePost(l.id, 'wordpress', { status: j.status === 'publish' ? 'success' : 'draft', history: hist }, state.by);
       toast(j.message, 'ok'); reload();
@@ -1179,7 +1186,9 @@ async function liveView(id) {
           info.performers ? h('div', {}, h('div', { class: 'cap sec' }, '出演者'), lines(info.performers)) : null,
           info.reserve_url ? h('a', { class: 'btn small ghost', style: 'display:inline-block;margin-top:8px', href: info.reserve_url, target: '_blank', rel: 'noopener' }, '取り置きフォームを開く') : null,
           editBtn('告知の情報', ['official_title', 'open_time', 'start_time', 'end_time', 'ticket_price', 'performers', 'reserve_url'])),
-        announcePane(l, info, conf, posts, reload)],
+        sec('🖼 フライヤー画像', files.some(f => f.kind === 'flyer') ? null : h('p', { class: 'empty' }, 'フライヤーの画像を追加すると、公式サイトに送るときに本文と一緒に入ります。'),
+          liveFileBlock(l, files, furl, 'flyer', conf, reload)),
+        announcePane(l, info, conf, posts, reload, files, furl)],
       day: () => [
         sec('🕐 当日のタイムテーブル', timeText ? h('div', { class: 'lsub' }, timeText) : null,
           info.set_time ? h('div', { class: 'lsub' }, '🎸 演奏 ' + info.set_time) : null,
