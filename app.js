@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=34';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=34';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=35';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=35';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/16-34'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-35'),
   ]);
 }
 
@@ -381,6 +381,7 @@ function moneyView(isIn, plain) {
 }
 
 // ---------- 貸借 ----------
+const LOAN_HIDE = ['STS', '晴']; // 「借りた」の相手には出さない(STSは共同物販の精算用、晴は対象外)
 const MODES = {
   loan:      { label: '借りた', title: 'メンバーがWiθのお金を借りた', eff: '資金 −／メンバーの借入 ＋', pick: b => true, sub: b => (b.owes_withi ? '借入 ' + yen(b.owes_withi) : ''), max: null },
   repay:     { label: '返済された', title: 'メンバーが返済した', eff: '資金 ＋／メンバーの借入 −', pick: b => b.owes_withi > 0, sub: b => '借入 ' + yen(b.owes_withi), max: b => b.owes_withi },
@@ -397,7 +398,7 @@ async function loanView(mode) {
   if (my !== renderId) return;
   const M = MODES[mode];
   const f = { party: '' };
-  const cand = d.balances.filter(b => M.pick(b));
+  const cand = d.balances.filter(b => M.pick(b) && !(mode === 'loan' && LOAN_HIDE.includes(b.name)));
   const amt = amountField();
   const memo = h('input', { type: 'text', placeholder: '例: キャビ修理代', autocomplete: 'off' });
   const date = h('input', { type: 'date', value: ymd() });
