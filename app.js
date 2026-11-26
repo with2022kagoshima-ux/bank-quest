@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=40';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=40';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=41';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=41';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-40'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-41'),
   ]);
 }
 
@@ -1111,7 +1111,7 @@ async function liveView(id) {
           h('button', { class: 'btn ghost small', style: 'margin-top:8px', onclick: () => shareStagePlot(l, info, files) }, '📎 ファイルを添付して送る(共有)'),
           l.venue_id ? h('button', { class: 'btn ghost small', style: 'margin:8px 0 0 8px', onclick: () => venueEmailModal(l, reload) }, '宛先を変更') : null,
           h('p', { class: 'hint' }, 'メールアプリが開き、宛先・件名・本文(いつもの文面)が入った状態になります。セット図は本文のリンク(7日間有効)で届きます。ファイルとして添付したいときは「添付して送る」を使ってください(件名と本文が一緒に渡されます)。'))],
-      set: () => setlistPane(l, conf, songs, slItems, slRows, reload),
+      set: () => setlistPane(l, conf, songs, slItems, slRows, reload, info),
       refl: () => [
         sec('🔁 反省・振り返り', info.reflection ? lines(info.reflection) : h('p', { class: 'empty' }, 'まだ書かれていません。良かったこと・直したいこと・次への課題などを書いてください。'),
           editBtn('反省・振り返り', ['reflection'])),
@@ -1219,8 +1219,103 @@ async function songsView() {
   } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, songsView)); }
 }
 
+// ---------- セットリストの書き出し(画像・PDF) ----------
+const WD = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+function slHeaderDefault(l, info) {
+  const [y, m, d] = String(l.live_date).slice(0, 10).split('-').map(Number);
+  const wd = WD[new Date(y, m - 1, d).getDay()];
+  const place = [l.prefecture, l.venue_name].filter(Boolean).join(' ');
+  return [`${y}/${m}/${d} ${wd} @${place}`, (info && info.official_title) || l.event_name].filter(Boolean).join('\n');
+}
+function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
+async function renderSetlist(headLines, entries) {
+  const W = 1240, H = 1754, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#000'; g.textBaseline = 'alphabetic';
+  const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif';
+  let y = 90;
+  try { const im = await loadImg('logo-wi.png?v=41'); const lw = 380, lh = lw * im.height / im.width; g.drawImage(im, (W - lw) / 2, y, lw, lh); y += lh + 50; } catch { y += 40; }
+  g.textAlign = 'center'; g.font = `700 30px ${FONT}`;
+  for (const t of headLines) { y += 42; g.fillText(t, W / 2, y); }
+  y += 70;
+  const rows = entries.length;
+  let fs = 54, lh = 72, gap = 46, note = 0;
+  const need = (f) => entries.reduce((s, e) => s + (e.gap ? f * 0.85 : f * 1.33) + (e.note ? f * 0.85 : 0), 0);
+  const avail = H - y - 110;
+  while (need(fs) > avail && fs > 24) fs -= 2;
+  lh = fs * 1.33; gap = fs * 0.85;
+  g.textAlign = 'right'; const xn = 255, xt = 290;
+  for (const e of entries) {
+    if (e.gap) { y += gap; continue; }
+    y += lh;
+    if (e.no != null) { g.textAlign = 'right'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.no + '.', xn, y); }
+    g.textAlign = 'left'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.text, xt, y);
+    if (e.note) { y += fs * 0.85; g.font = `700 ${Math.round(fs * 0.8)}px ${FONT}`; g.fillText(e.note, xt, y); }
+  }
+  return c;
+}
+function slEntries(items, byId) {
+  const out = []; let no = 0;
+  for (const it of items) {
+    if (it.type === 'mc') { if (out.length && !out[out.length - 1].gap) out.push({ gap: true }); continue; }
+    if (it.type === 'song') { const s = byId.get(it.song_id); if (!s) continue; out.push({ no: ++no, text: s.title, note: it.note }); }
+    else out.push({ text: it.label || '', note: it.note });
+  }
+  while (out.length && out[out.length - 1].gap) out.pop();
+  return out;
+}
+function jpegToPdf(jpeg, w, h) {
+  const enc = new TextEncoder(); const parts = []; let len = 0; const offs = [];
+  const push = b => { const u = typeof b === 'string' ? enc.encode(b) : b; parts.push(u); len += u.length; };
+  const obj = (n, body) => { offs[n] = len; push(`${n} 0 obj\n`); body(); push('\nendobj\n'); };
+  push('%PDF-1.4\n');
+  obj(1, () => push('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2, () => push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'));
+  obj(3, () => push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>'));
+  obj(4, () => { push(`<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`); push(jpeg); push('\nendstream'); });
+  const cs = 'q 595.28 0 0 841.89 0 0 cm /Im0 Do Q';
+  obj(5, () => push(`<< /Length ${cs.length} >>\nstream\n${cs}\nendstream`));
+  const xr = len; push('xref\n0 6\n0000000000 65535 f \n');
+  for (let i = 1; i <= 5; i++) push(String(offs[i]).padStart(10, '0') + ' 00000 n \n');
+  push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xr}\n%%EOF`);
+  const out = new Uint8Array(len); let p = 0; for (const u of parts) { out.set(u, p); p += u.length; }
+  return out;
+}
+function saveBlob(blob, name) {
+  const a = h('a', { href: URL.createObjectURL(blob), download: name });
+  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+function exportSetlistModal(l, info, items, byId) {
+  const key = 'slhead:' + l.id;
+  let init = ''; try { init = localStorage.getItem(key) || ''; } catch {}
+  const ta = h('textarea', { class: 'area', rows: 5 }); ta.value = init || slHeaderDefault(l, info);
+  const prev = h('div', { class: 'hint' }, '');
+  const fname = ext => `セトリ_${String(l.live_date).slice(0, 10)}_${(l.venue_name || '').replace(/[\\/:*?"<>|\s]/g, '')}.${ext}`;
+  const build = async () => {
+    try { localStorage.setItem(key, ta.value); } catch {}
+    return renderSetlist(ta.value.split('\n').map(x => x.trim()).filter(Boolean), slEntries(items, byId));
+  };
+  const m = modal([
+    h('h3', {}, '🖼 セトリを書き出す'),
+    field('上に入れる文字(1行ずつ)', ta, '日付・会場・イベント名・持ち時間などを自由に直せます。'),
+    h('button', { class: 'btn big', style: 'width:100%', onclick: async () => {
+      try { const c = await build(); const blob = await new Promise(r => c.toBlob(r, 'image/png')); const f = new File([blob], fname('png'), { type: 'image/png' });
+        if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f], title: 'セットリスト' }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+        saveBlob(blob, fname('png')); toast('画像を保存しました', 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '🖼 画像(PNG)にする'),
+    h('button', { class: 'btn ghost', style: 'width:100%;margin-top:8px', onclick: async () => {
+      try { const c = await build(); const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92)); const pdf = jpegToPdf(new Uint8Array(await blob.arrayBuffer()), c.width, c.height);
+        const out = new Blob([pdf], { type: 'application/pdf' }); const f = new File([out], fname('pdf'), { type: 'application/pdf' });
+        if (navigator.canShare && navigator.canShare({ files: [f] })) { try { await navigator.share({ files: [f], title: 'セットリスト' }); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+        saveBlob(out, fname('pdf')); toast('PDFを保存しました', 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '📄 PDFにする'),
+    prev,
+    h('button', { class: 'btn ghost small', style: 'margin-top:10px', onclick: () => m.close() }, '閉じる'),
+  ]);
+}
+
 let slQueue = Promise.resolve();
-function setlistPane(l, conf, songs, items, rows, reload) {
+function setlistPane(l, conf, songs, items, rows, reload, info) {
   const st = computeSongStats(rows, ymd());
   const byId = new Map(songs.map(s => [s.id, s]));
   const wrap = h('div', {});
@@ -1285,6 +1380,7 @@ function setlistPane(l, conf, songs, items, rows, reload) {
             h('button', { class: 'btn small ghost', onclick: () => addOther('other', 'SE') }, '＋ SE'),
             h('button', { class: 'btn small ghost', onclick: () => addOther('other', 'ENCORE') }, '＋ アンコール'),
             h('button', { class: 'btn small ghost', onclick: copyFrom }, '📄 過去からコピー')))),
+      items.some(x => x.type === 'song') ? h('button', { class: 'btn big', style: 'width:100%;margin-top:4px', onclick: () => exportSetlistModal(l, info, items, byId) }, '🖼 画像・PDFで書き出す') : null,
       h('p', { class: 'hint' }, '曲名の列をタップすると、メモ(短縮ver.など)を付けられます。変更は自動で保存されます。曲の一覧・回数は ', h('a', { href: '#/songs' }, '曲マスター'), ' で見られます。'));
   }
   draw();
