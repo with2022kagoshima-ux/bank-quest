@@ -289,6 +289,30 @@ const real = {
   },
   liveAirStatus: id => rest('rpc/live_air_status', { method: 'POST', body: { p_live: id } }),
   liveAirPost: (id, by) => rest('rpc/app_live_air_post', { method: 'POST', body: { p_live: id, p_by: by } }),
+  async liveFiles(id) { return rest(`live_files?select=id,kind,path,name,mime&live_id=eq.${id}&order=created_at`); },
+  async addLiveFile(liveId, kind, file, by) {
+    const s = await freshSession();
+    const ext = file.type === 'application/pdf' ? 'pdf' : file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+    const path = `${liveId}/${kind}/${crypto.randomUUID()}.${ext}`;
+    let r;
+    try { r = await fetch(`${C.url}/storage/v1/object/live-files/${path}`, { method: 'POST', headers: { apikey: C.key, Authorization: `Bearer ${s.access}`, 'Content-Type': file.type, 'x-upsert': 'false' }, body: file }); }
+    catch { throw new ApiError('通信できません。電波のある場所でもう一度お試しください。', 'net'); }
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new ApiError(/size|too large|exceed/i.test(j.message || '') ? 'ファイルが大きすぎます(10MBまで)' : (j.message || 'ファイルを保存できませんでした'), 'api'); }
+    await rest('live_files', { method: 'POST', prefer: 'return=minimal', body: { live_id: liveId, kind, path, name: file.name || null, mime: file.type, created_by: by } });
+  },
+  async liveFileUrl(path, expires = 3600) {
+    const s = await freshSession();
+    const r = await fetch(`${C.url}/storage/v1/object/sign/live-files/${path}`, { method: 'POST', headers: { apikey: C.key, Authorization: `Bearer ${s.access}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn: expires }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.signedURL) throw new ApiError('ファイルを読み込めませんでした', 'api');
+    return `${C.url}/storage/v1${j.signedURL}`;
+  },
+  async removeLiveFile(f) {
+    await rest(`live_files?id=eq.${f.id}`, { method: 'DELETE', prefer: 'return=minimal' });
+    const s = await freshSession();
+    await fetch(`${C.url}/storage/v1/object/live-files/${f.path}`, { method: 'DELETE', headers: { apikey: C.key, Authorization: `Bearer ${s.access}` } }).catch(() => {});
+  },
+  async saveVenueEmail(venueId, email) { await rest(`venues?id=eq.${venueId}`, { method: 'PATCH', prefer: 'return=minimal', body: { email } }); },
   async liveInfo(id) {
     const r = await rest(`lives?select=official_title,open_time,start_time,end_time,performers,ticket_price,reserve_url,timetable,reflection,video_url&id=eq.${id}`);
     return r[0] || {};
@@ -297,12 +321,12 @@ const real = {
   async lives() {
     const [rows, vs, ls] = await Promise.all([
       rest('v_live_profit?select=*&order=live_date.desc'),
-      rest('venues?select=id,name,prefecture&order=name'),
+      rest('venues?select=id,name,prefecture,email&order=name'),
       rest('lives?select=id,memo,score'),
     ]);
     const vm = new Map(vs.map(v => [v.id, v])); const lm = new Map(ls.map(l => [l.id, l]));
     return rows.map(r => ({ ...r, id: r.live_id, income: Number(r.income), expense: Number(r.expense), profit: Number(r.profit),
-      venue_name: r.venue_id && vm.get(r.venue_id) ? vm.get(r.venue_id).name : '', memo: (lm.get(r.live_id) || {}).memo || '', score: (lm.get(r.live_id) || {}).score || null }));
+      venue_name: r.venue_id && vm.get(r.venue_id) ? vm.get(r.venue_id).name : '', venue_email: r.venue_id && vm.get(r.venue_id) ? vm.get(r.venue_id).email || '' : '', memo: (lm.get(r.live_id) || {}).memo || '', score: (lm.get(r.live_id) || {}).score || null }));
   },
   liveRating: async () => { const r = await rest('settings?select=value&key=eq.live_rating'); return r[0] ? r[0].value : null; },
   venues: () => rest('venues?select=id,name,prefecture&order=name'),
@@ -409,7 +433,7 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]], { air_type1_role: 'color', air_type2_role: 'size' });
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5, air_type1_role: 'size', air_type2_role: null });
-  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = [];
+  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = []; const LF = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -442,6 +466,11 @@ function makeDemo() {
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
     async offset(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable || e.amount > b.recv) throw new ApiError(`相殺できるのは、未払い残(${b.payable}円)と借入残(${b.recv}円)の小さい方までです`); const r = add({ occurred_on: e.date, kind: 'offset', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
 
+    async liveFiles(id) { await wait(); return LF.filter(f => f.live_id === id); },
+    async addLiveFile(liveId, kind, file) { await wait(); LF.push({ id: 'f' + (++n), live_id: liveId, kind, path: URL.createObjectURL(file), name: file.name, mime: file.type }); },
+    async liveFileUrl(path) { return path; },
+    async removeLiveFile(f) { await wait(); const i = LF.findIndex(x => x.id === f.id); if (i >= 0) LF.splice(i, 1); },
+    async saveVenueEmail() { await wait(); },
     async liveInfo(id) { await wait(); const l = LV.find(x => x.id === id) || {}; return { official_title: l.official_title || 'ハロウィン後夜祭「音で化けろ」', open_time: l.open_time || '14:30', start_time: l.start_time || '15:00', end_time: l.end_time || '', ticket_price: l.ticket_price || 'ADV ¥3,000 / DOOR ¥3,500 +1D', performers: l.performers || 'DOZEONE\nHOW\nWiθ（鹿児島）', reserve_url: l.reserve_url || '', timetable: l.timetable || '', reflection: l.reflection || '', video_url: l.video_url || '' }; },
     async saveLiveInfo(id, patch) { await wait(); Object.assign(LV.find(x => x.id === id) || {}, patch); },
     async lives() {

@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=36';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=36';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=37';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=37';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -108,18 +108,18 @@ function thumb(p, big) {
   return img;
 }
 // ---------- 領収書(撮影・アップロード) ----------
-async function shrinkImage(file) {
+async function shrinkImage(file, MAX = 1600, Q = 0.72) {
   if (file.type === 'application/pdf') return file;
   if (!/^image\//.test(file.type)) throw new Error('画像かPDFを選んでください');
   try {
     const bmp = await createImageBitmap(file);
-    const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const k = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
     const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
     c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', 0.72));
+    const blob = await new Promise(res => c.toBlob(res, 'image/jpeg', Q));
     if (blob) return new File([blob], 'receipt.jpg', { type: 'image/jpeg' });
   } catch { /* 縮小できない形式は、そのまま送る */ }
-  if (file.size > 5 * 1024 * 1024) throw new Error('ファイルが大きすぎます(5MBまで)');
+  if (file.size > (MAX > 1600 ? 10 : 5) * 1024 * 1024) throw new Error('ファイルが大きすぎます(' + (MAX > 1600 ? 10 : 5) + 'MBまで)');
   return file;
 }
 function receiptPicker() {
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-36'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-37'),
   ]);
 }
 
@@ -903,6 +903,52 @@ function liveEntryModal(live, isIn, done, entry) {
     msg, ok]);
 }
 
+function liveFileBlock(live, files, furl, kind, conf, done) {
+  const mine = files.filter(f => f.kind === kind);
+  const list = h('div', { class: 'rthumbs' }, ...mine.map(f => h('div', { class: 'rthumb big' },
+    f.mime === 'application/pdf' ? h('a', { class: 'rpdf', href: furl.get(f.id) || '#', target: '_blank', rel: 'noopener' }, 'PDF') : h('a', { href: furl.get(f.id) || '#', target: '_blank', rel: 'noopener' }, h('img', { src: furl.get(f.id) || '', alt: '' })),
+    conf ? null : h('button', { type: 'button', class: 'rx', 'aria-label': '削除', onclick: async () => {
+      if (!(await confirmBox('このファイルを削除する？', '完全に消えます。', '削除する'))) return;
+      try { await api.removeLiveFile(f); toast('削除しました', 'ok'); done(); } catch (er) { toast(errMsg(er), 'err'); }
+    } }, '🗑'))));
+  const mk = (label, attrs) => {
+    const inp = h('input', { type: 'file', style: 'display:none', ...attrs });
+    inp.addEventListener('change', async () => {
+      if (!state.by) { await pickBy(true); if (!state.by) { inp.value = ''; return; } }
+      let n = 0;
+      for (const f of [...inp.files]) { try { await api.addLiveFile(live.id, kind, await shrinkImage(f, 2400, 0.85), state.by); n++; } catch (e) { toast(errMsg(e), 'err'); } }
+      inp.value = ''; if (n) { toast(n + '件 保存しました', 'ok'); done(); }
+    });
+    return h('span', {}, inp, h('button', { type: 'button', class: 'btn ghost small', onclick: () => inp.click() }, label));
+  };
+  return h('div', {}, mine.length ? list : null, conf ? null : h('div', { class: 'with-btn', style: 'gap:8px;flex-wrap:wrap;margin-top:8px' }, mk('📷 撮影する', { accept: 'image/*', capture: 'environment' }), mk('🖼 画像・PDFを追加', { accept: 'image/*,application/pdf', multiple: true })));
+}
+function venueEmailModal(live, done) {
+  const em = h('input', { type: 'email', autocomplete: 'off', placeholder: '例: info@livehouse.jp', value: live.venue_email || '' });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const ok = h('button', { class: 'btn big', onclick: async () => {
+    ok.disabled = true; msg.textContent = '';
+    try { await api.saveVenueEmail(live.venue_id, em.value.trim() || null); m.close(); toast('保存しました', 'ok'); done(); } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+  } }, '保存する');
+  const m = modal([h('h3', {}, '✉️ ' + (live.venue_name || '会場') + ' の連絡先'), h('p', { class: 'hint' }, 'セット図などを送るメールアドレスです。会場ごとに1度入れれば、次回からも使えます。'), field('メールアドレス', em), msg, ok]);
+}
+async function sendStagePlot(live, info, files) {
+  const plots = files.filter(f => f.kind === 'stageplot');
+  const links = (await Promise.all(plots.map(f => api.liveFileUrl(f.path, 604800).catch(() => null)))).filter(Boolean);
+  const d = String(live.live_date).slice(0, 10).replaceAll('-', '/');
+  const subj = `【Wiθ】${d} ${info.official_title || live.event_name} セット図のご提出`;
+  const body = `${live.venue_name || ''} ご担当者様\n\nお世話になっております。Wiθ(鹿児島)です。\n${d} ${info.official_title || live.event_name} の出演にあたり、セット図をお送りします。\nご確認のほど、よろしくお願いいたします。\n` + (links.length ? '\n▼セット図(7日間有効)\n' + links.join('\n') + '\n' : '') + '\nWiθ';
+  location.href = `mailto:${encodeURIComponent(live.venue_email || '')}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
+}
+async function shareStagePlot(live, files) {
+  const plots = files.filter(f => f.kind === 'stageplot');
+  if (!plots.length) { toast('先にセット図を追加してください', 'err'); return; }
+  try {
+    const fs = await Promise.all(plots.map(async (f, i) => { const url = await api.liveFileUrl(f.path); const b = await (await fetch(url)).blob(); return new File([b], `セット図${plots.length > 1 ? i + 1 : ''}.${f.mime === 'application/pdf' ? 'pdf' : f.mime === 'image/png' ? 'png' : 'jpg'}`, { type: f.mime }); }));
+    if (!navigator.canShare || !navigator.canShare({ files: fs })) { toast('この端末では添付つき共有に未対応です。メール本文のリンクをお使いください', 'err'); return; }
+    await navigator.share({ files: fs, title: 'セット図', text: `${live.venue_name || ''} ${live.event_name} セット図` });
+  } catch (e) { if (e && e.name !== 'AbortError') toast('共有できませんでした', 'err'); }
+}
 const liveTabs = new Map();
 const LIVE_FIELDS = {
   official_title: ['正式なライブ名', 'text'], open_time: ['開場(例 18:00)', 'text'], start_time: ['開演(例 18:30)', 'text'], end_time: ['終演(例 22:00)', 'text'],
@@ -1018,6 +1064,8 @@ async function liveView(id) {
         try { await api.setLiveStatus(id, { confirm: !conf, by: state.by, score: { profit: l.profit, income: l.income, expense: l.expense, rating: lab, merch_sales: airSales, baskets: myAb.length, avg_basket: myAb.length ? Math.round(airSales / myAb.length) : 0 } }); toast(conf ? '確定を解除しました' : '確定しました', 'ok'); reload(); } catch (e) { toast(errMsg(e), 'err'); }
       } }, conf ? '確定を解除' : '✅ このライブを確定する')];
     const info = await api.liveInfo(id).catch(() => ({}));
+    const files = await api.liveFiles(id).catch(() => []);
+    const furl = new Map(await Promise.all(files.map(async f => [f.id, await api.liveFileUrl(f.path).catch(() => null)])));
     const sec = (title, ...els) => h('section', { class: 'card' }, h('div', { class: 'cap' }, title), ...els);
     const lines = t => h('p', { class: 'pre' }, t);
     const editBtn = (label, fields) => conf ? null : h('button', { class: 'btn small ghost', style: 'margin-top:10px', onclick: () => liveInfoModal(l, info, label, fields, reload) }, '✏️ 編集');
@@ -1036,8 +1084,20 @@ async function liveView(id) {
           h('button', { class: 'btn big', style: 'width:100%;margin-top:10px', onclick: async () => { try { await navigator.clipboard.writeText(announce()); toast('コピーしました', 'ok'); } catch { toast('コピーできませんでした。文章を長押ししてコピーしてください', 'err'); } } }, '📋 告知文をコピー'))],
       day: () => [
         sec('🕐 当日のタイムテーブル', timeText ? h('div', { class: 'lsub' }, timeText) : null,
-          info.timetable ? lines(info.timetable) : h('p', { class: 'empty' }, 'まだ入力されていません。搬入・リハ・本番・物販の時間などを書いておくと、当日に全員が見られます。'),
-          editBtn('当日のタイムテーブル', ['timetable']))],
+          info.timetable ? lines(info.timetable) : (files.some(f => f.kind === 'timetable') ? null : h('p', { class: 'empty' }, 'まだ入力されていません。文字で書くか、会場から届いたPDF・画像を追加してください。')),
+          liveFileBlock(l, files, furl, 'timetable', conf, reload),
+          editBtn('当日のタイムテーブル', ['timetable'])),
+        sec('🎛 セット図', files.some(f => f.kind === 'stageplot') ? null : h('p', { class: 'empty' }, 'セット図の画像・PDFを追加してください。'),
+          liveFileBlock(l, files, furl, 'stageplot', conf, reload)),
+        sec('✉️ ライブハウスに提出', h('div', { class: 'lsub' }, (l.venue_name || '会場未設定') + (l.venue_email ? ' ・ ' + l.venue_email : ' ・ メールアドレス未登録')),
+          h('button', { class: 'btn big', style: 'width:100%;margin-top:10px', onclick: () => {
+            if (!l.venue_id) { toast('先にライブの会場を設定してください', 'err'); return; }
+            if (!l.venue_email) { venueEmailModal(l, reload); return; }
+            sendStagePlot(l, info, files);
+          } }, '✉️ セット図のメールを作る'),
+          h('button', { class: 'btn ghost small', style: 'margin-top:8px', onclick: () => shareStagePlot(l, files) }, '📎 ファイルを添付して送る(共有)'),
+          l.venue_id ? h('button', { class: 'btn ghost small', style: 'margin:8px 0 0 8px', onclick: () => venueEmailModal(l, reload) }, '宛先を変更') : null,
+          h('p', { class: 'hint' }, 'メールアプリが開き、宛先・件名・本文が入った状態になります。セット図は本文のリンク(7日間有効)で届きます。ファイルとして添付したいときは「添付して送る」を使ってください。'))],
       refl: () => [
         sec('🔁 反省・振り返り', info.reflection ? lines(info.reflection) : h('p', { class: 'empty' }, 'まだ書かれていません。良かったこと・直したいこと・次への課題などを書いてください。'),
           editBtn('反省・振り返り', ['reflection'])),
