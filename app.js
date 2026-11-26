@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=43';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=43';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=44';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=44';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-43'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-44'),
   ]);
 }
 
@@ -1253,17 +1253,18 @@ async function renderSetlist(headLines, entries) {
   const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif';
   let y = 80;
   try { const im = await loadImg('logo-wi.png?v=41'); const lw = 270, lh = lw * im.height / im.width; g.drawImage(im, (W - lw) / 2, y, lw, lh); y += lh + 30; } catch { y += 30; }
-  g.textAlign = 'center'; g.font = `700 30px ${FONT}`;
+  g.textAlign = 'center'; g.font = `700 34px ${FONT}`;
   const lines = headLines.flatMap(t => wrapHead(g, t, W - 220));
-  for (const t of lines) { y += 52; g.fillText(t, W / 2, y); }
-  y += 50;
-  let fs = 48;
-  const lhOf = f => f * 1.55, gapOf = f => f * 1.2;
+  for (const t of lines) { y += 58; g.fillText(t, W / 2, y); }
+  y += 60;
+  let fs = 76;
+  const lhOf = f => f * 1.75, gapOf = f => f * 1.5;
   const need = f => entries.reduce((s, e) => s + (e.gap ? gapOf(f) : lhOf(f)) + (e.note ? lhOf(f) * 0.85 : 0), 0);
   const avail = H - y - 110;
-  while (need(fs) > avail && fs > 24) fs -= 2;
+  const widest = f => { g.font = `700 ${f}px ${FONT}`; return Math.max(0, ...entries.map(e => Math.max(g.measureText(e.text || '').width, g.measureText(e.note || '').width))); };
+  while ((need(fs) > avail || 250 + widest(fs) > W - 90) && fs > 24) fs -= 2;
   const lh = lhOf(fs), gap = gapOf(fs);
-  const xn = 225, xt = 250;
+  const xn = 235, xt = 262;
   for (const e of entries) {
     if (e.gap) { y += gap; continue; }
     y += lh;
