@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=39';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=39';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=40';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=40';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-39'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-40'),
   ]);
 }
 
@@ -831,6 +831,7 @@ async function liveListView() {
     body.replaceChildren(
       h('section', { class: 'card mini' }, h('div', { class: 'cap' }, '🎸 確定したライブ ' + conf.length + '本 の利益'), h('b', { class: tot < 0 ? 'neg' : 'pos' }, yen(tot))),
       h('button', { class: 'btn big in', style: 'width:100%', onclick: () => liveModal(null, id => { location.hash = '#/live?id=' + id; }) }, '＋ ライブを登録'),
+      h('a', { class: 'btn ghost', style: 'display:block;text-align:center;text-decoration:none;margin-top:8px', href: '#/songs' }, '🎵 曲マスター(演奏回数・初披露)'),
       h('div', { class: 'cap sec' }, 'ライブ一覧'),
       ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだライブがありません。上のボタンから登録してください。')]),
       h('p', { class: 'hint' }, '過去の記録(取り込み済みのデータ)は、ライブとは結びついていません。これから登録するライブの収支がここに集まります。'));
@@ -1076,6 +1077,7 @@ async function liveView(id) {
       } }, conf ? '確定を解除' : '✅ このライブを確定する')];
     const info = await api.liveInfo(id).catch(() => ({}));
     const files = await api.liveFiles(id).catch(() => []);
+    const [songs, slItems, slRows] = await Promise.all([api.songs().catch(() => []), api.setlist(id).catch(() => []), api.liveSetlists().catch(() => [])]);
     const furl = new Map(await Promise.all(files.map(async f => [f.id, await api.liveFileUrl(f.path).catch(() => null)])));
     const sec = (title, ...els) => h('section', { class: 'card' }, h('div', { class: 'cap' }, title), ...els);
     const lines = t => h('p', { class: 'pre' }, t);
@@ -1109,6 +1111,7 @@ async function liveView(id) {
           h('button', { class: 'btn ghost small', style: 'margin-top:8px', onclick: () => shareStagePlot(l, info, files) }, '📎 ファイルを添付して送る(共有)'),
           l.venue_id ? h('button', { class: 'btn ghost small', style: 'margin:8px 0 0 8px', onclick: () => venueEmailModal(l, reload) }, '宛先を変更') : null,
           h('p', { class: 'hint' }, 'メールアプリが開き、宛先・件名・本文(いつもの文面)が入った状態になります。セット図は本文のリンク(7日間有効)で届きます。ファイルとして添付したいときは「添付して送る」を使ってください(件名と本文が一緒に渡されます)。'))],
+      set: () => setlistPane(l, conf, songs, slItems, slRows, reload),
       refl: () => [
         sec('🔁 反省・振り返り', info.reflection ? lines(info.reflection) : h('p', { class: 'empty' }, 'まだ書かれていません。良かったこと・直したいこと・次への課題などを書いてください。'),
           editBtn('反省・振り返り', ['reflection'])),
@@ -1116,7 +1119,7 @@ async function liveView(id) {
           editBtn('全尺映像', ['video_url']))],
       money: () => moneyEls,
     };
-    const TABS = [['money', '💰 収支'], ['info', '📣 告知'], ['day', '🕐 当日'], ['refl', '🔁 反省']];
+    const TABS = [['money', '💰 収支'], ['info', '📣 告知'], ['day', '🕐 当日'], ['set', '🎵 セトリ'], ['refl', '🔁 反省']];
     let tab = liveTabs.get(id) || 'money';
     const pane = h('div', {});
     const bar = h('div', { class: 'tabs' });
@@ -1128,6 +1131,164 @@ async function liveView(id) {
     draw();
     body.replaceChildren(head, bar, pane);
   } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, () => liveView(id))); }
+}
+
+// ---------- 曲マスター・セットリスト ----------
+const fmtDur = s => s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '';
+const parseDur = t => { const m = String(t || '').trim().match(/^(\d{1,3})[:：](\d{1,2})$/); if (m) return Number(m[1]) * 60 + Number(m[2]); const n = Number(String(t || '').trim()); return n > 0 ? Math.round(n * 60) : null; };
+function computeSongStats(rows, today) {
+  const by = new Map();
+  for (const r of rows) {
+    if (!by.has(r.live_id)) by.set(r.live_id, { date: String((r.lives && r.lives.live_date) || '').slice(0, 10), items: [] });
+    by.get(r.live_id).items.push(r);
+  }
+  const st = new Map();
+  const get = id => { if (!st.has(id)) st.set(id, { plays: 0, first: null, last: null, firstLive: null, opener: 0, closer: 0 }); return st.get(id); };
+  for (const [lid, v] of by) {
+    if (!v.date || v.date > today) continue;
+    const songs = v.items.filter(x => x.type === 'song' && x.song_id).sort((a, b) => a.position - b.position);
+    const seen = new Set();
+    songs.forEach((x, i) => {
+      const s = get(x.song_id);
+      if (!seen.has(x.song_id)) { seen.add(x.song_id); s.plays++; if (!s.first || v.date < s.first) { s.first = v.date; s.firstLive = lid; } if (!s.last || v.date > s.last) s.last = v.date; }
+      if (i === 0) s.opener++;
+      if (i === songs.length - 1) s.closer++;
+    });
+  }
+  return st;
+}
+const songMatch = (s, q) => { q = q.trim().toLowerCase(); return !q || [s.title, s.aliases, s.artist].some(t => t && String(t).toLowerCase().includes(q)); };
+
+function songModal(song0, done) {
+  const song = song0 && song0.id ? song0 : null;
+  const pre = song0 || song;
+  const f = { kind: song ? song.kind : 'original' };
+  const title = h('input', { type: 'text', placeholder: '曲名', autocomplete: 'off', value: pre ? pre.title : '' });
+  const artist = h('input', { type: 'text', placeholder: 'カバーの場合は原曲のアーティスト', autocomplete: 'off', value: (song && song.artist) || '' });
+  const aliases = h('input', { type: 'text', placeholder: '別名・ローマ字など(検索用)', autocomplete: 'off', value: (song && song.aliases) || '' });
+  const dur = h('input', { type: 'text', placeholder: '例: 3:45', inputmode: 'text', autocomplete: 'off', value: fmtDur(song && song.duration_sec) });
+  const notes = h('input', { type: 'text', placeholder: 'メモ(任意)', autocomplete: 'off', value: (song && song.notes) || '' });
+  const msg = h('p', { class: 'form-err', role: 'alert' });
+  const kindChips = chips([{ id: 'original', label: 'オリジナル' }, { id: 'cover', label: 'カバー' }], f.kind, id => { f.kind = id; });
+  const m = modal([
+    h('h3', {}, song ? '曲を編集' : '曲を登録'),
+    field('曲名', title), field('種類', kindChips), field('アーティスト', artist), field('別名', aliases), field('演奏時間(分:秒)', dur, '任意。入れるとセットリストの合計時間が出ます。'), field('メモ', notes), msg,
+    h('div', { class: 'row' },
+      h('button', { class: 'btn ghost', onclick: () => m.close() }, 'やめる'),
+      h('button', { class: 'btn', onclick: async () => {
+        const t = title.value.trim();
+        if (!t) { msg.textContent = '曲名を入れてください'; return; }
+        const o = { title: t, kind: f.kind, artist: artist.value.trim() || null, aliases: aliases.value.trim() || null, notes: notes.value.trim() || null, duration_sec: parseDur(dur.value) };
+        try { let r; if (song) { await api.saveSong(song.id, o); r = { ...song, ...o }; } else r = await api.addSong(o, state.by); m.close(); toast('保存しました', 'ok'); done && done(r); }
+        catch (e) { msg.textContent = /duplicate|unique|23505/i.test(errMsg(e)) ? '同じ曲名がすでにあります' : errMsg(e); }
+      } }, '保存')),
+    song ? h('button', { class: 'btn ghost small', style: 'margin-top:10px', onclick: async () => {
+      if (!await confirmBox('この曲を一覧から外す？', 'これまでのセットリストの記録は残ります。', '外す')) return;
+      try { await api.saveSong(song.id, { is_active: false }); m.close(); toast('外しました', 'ok'); done && done(null); } catch (e) { toast(errMsg(e), 'err'); }
+    } }, '🗑 一覧から外す') : null,
+  ]);
+}
+
+async function songsView() {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell('🎵 曲マスター', body, '#/live-list'));
+  try {
+    const [songs, rows] = await Promise.all([api.songs(), api.liveSetlists().catch(() => [])]);
+    if (my !== renderId) return;
+    const st = computeSongStats(rows, ymd());
+    const q = h('input', { type: 'text', placeholder: '曲名で探す', autocomplete: 'off' });
+    const list = h('div', {});
+    const draw = () => {
+      const xs = songs.filter(s => songMatch(s, q.value)).sort((a, b) => ((st.get(b.id) || {}).plays || 0) - ((st.get(a.id) || {}).plays || 0) || a.title.localeCompare(b.title));
+      list.replaceChildren(...(xs.length ? xs.map(s => {
+        const x = st.get(s.id);
+        return h('button', { class: 'lrow', style: 'width:100%;text-align:left', onclick: () => songModal(s, () => songsView()) },
+          h('span', { class: 'lico' }, s.kind === 'cover' ? '🎤' : '🎵'),
+          h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, s.title),
+            h('div', { class: 'lsub' }, x ? `${x.plays}回 ・ 初 ${dshow(x.first)} ・ 最後 ${dshow(x.last)}` : 'まだ演奏記録なし'),
+            h('div', { class: 'ltags' }, s.kind === 'cover' ? h('i', { class: 'tag mid' }, 'カバー' + (s.artist ? ' / ' + s.artist : '')) : null, x && x.opener ? h('i', { class: 'tag ok' }, '1曲目 ' + x.opener) : null, x && x.closer ? h('i', { class: 'tag ok' }, 'ラスト ' + x.closer) : null, s.duration_sec ? h('i', { class: 'tag recv' }, fmtDur(s.duration_sec)) : null)));
+      }) : [h('p', { class: 'empty' }, songs.length ? '見つかりません' : 'まだ曲がありません。')]));
+    };
+    q.addEventListener('input', draw);
+    draw();
+    body.replaceChildren(
+      h('button', { class: 'btn big in', style: 'width:100%', onclick: () => songModal(null, () => songsView()) }, '＋ 曲を登録'),
+      field('検索', q), list,
+      h('p', { class: 'hint' }, '回数は、日付が今日までのライブのセットリストから数えています。'));
+  } catch (e) { if (my === renderId) body.replaceChildren(errorBox(e, songsView)); }
+}
+
+let slQueue = Promise.resolve();
+function setlistPane(l, conf, songs, items, rows, reload) {
+  const st = computeSongStats(rows, ymd());
+  const byId = new Map(songs.map(s => [s.id, s]));
+  const wrap = h('div', {});
+  const save = () => { slQueue = slQueue.then(() => api.saveSetlist(l.id, items, state.by)).catch(e => toast(errMsg(e), 'err')); return slQueue; };
+  const commit = () => { draw(); save(); };
+  const move = (i, d) => { const j = i + d; if (j < 0 || j >= items.length) return; [items[i], items[j]] = [items[j], items[i]]; commit(); };
+  const addSongs = () => {
+    const q = h('input', { type: 'text', placeholder: '曲名で探す', autocomplete: 'off' });
+    const list = h('div', {});
+    const m = modal([h('h3', {}, '曲を追加'), q, list]);
+    const drawL = () => {
+      const xs = songs.filter(s => songMatch(s, q.value));
+      list.replaceChildren(
+        ...xs.map(s => h('button', { class: 'lrow', style: 'width:100%;text-align:left', onclick: () => { items.push({ type: 'song', song_id: s.id }); m.close(); commit(); } },
+          h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, s.title), h('div', { class: 'lsub' }, s.kind === 'cover' ? 'カバー' + (s.artist ? ' / ' + s.artist : '') : 'オリジナル')))),
+        h('button', { class: 'btn ghost', style: 'width:100%;margin-top:8px', onclick: () => { const t = q.value.trim(); m.close(); songModal(t ? { id: null, title: t, kind: 'original' } : null, async r => { if (!r) return; songs.push(r); byId.set(r.id, r); items.push({ type: 'song', song_id: r.id }); commit(); }, true); } }, '＋ 新しい曲として登録' + (q.value.trim() ? '「' + q.value.trim() + '」' : '')));
+    };
+    q.addEventListener('input', drawL);
+    drawL();
+  };
+  const addOther = (type, label) => { items.push({ type, label }); commit(); };
+  const copyFrom = () => {
+    const by = new Map();
+    for (const r of rows) { if (r.live_id === l.id) continue; if (!by.has(r.live_id)) by.set(r.live_id, { d: String((r.lives && r.lives.live_date) || '').slice(0, 10), name: (r.lives && r.lives.event_name) || '', items: [] }); by.get(r.live_id).items.push(r); }
+    const ls = [...by.entries()].sort((a, b) => b[1].d.localeCompare(a[1].d));
+    const m = modal([h('h3', {}, '過去のセットリストをコピー'), ...(ls.length ? ls.map(([lid, v]) => h('button', { class: 'lrow', style: 'width:100%;text-align:left', onclick: async () => {
+      if (items.length && !await confirmBox('今のセットリストを置き換える？', '入力済みの内容は消えます。', '置き換える')) return;
+      items.splice(0, items.length, ...v.items.sort((a, b) => a.position - b.position).map(x => ({ type: x.type, song_id: x.song_id, label: x.label || null, note: x.note || null })));
+      m.close(); commit();
+    } }, h('div', { class: 'lmain' }, h('div', { class: 'lmemo' }, v.name), h('div', { class: 'lsub' }, dshow(v.d) + ' ・ ' + v.items.filter(x => x.type === 'song').length + '曲')))) : [h('p', { class: 'empty' }, 'コピーできるセットリストがまだありません。')])]);
+  };
+  const noteModal = it => {
+    const inp = h('input', { type: 'text', value: it.note || '', placeholder: '例: 短縮ver. / ここでMC', autocomplete: 'off' });
+    const m = modal([h('h3', {}, 'メモ'), inp, h('div', { class: 'row' }, h('button', { class: 'btn ghost', onclick: () => m.close() }, 'やめる'), h('button', { class: 'btn', onclick: () => { it.note = inp.value.trim() || null; m.close(); commit(); } }, '保存'))]);
+  };
+  function draw() {
+    let no = 0, total = 0;
+    const rowsEl = items.map((it, i) => {
+      const s = it.type === 'song' ? byId.get(it.song_id) : null;
+      if (s) { no++; total += s.duration_sec || 0; }
+      const x = s && st.get(s.id);
+      const fresh = s && (!x || x.firstLive === l.id);
+      return h('div', { class: 'lrow', style: it.type === 'song' ? '' : 'opacity:.8' },
+        h('span', { class: 'lico' }, s ? String(no) : '—'),
+        h('button', { class: 'lmain', style: 'text-align:left;background:none;border:0;color:inherit;padding:0', onclick: () => !conf && noteModal(it) },
+          h('div', { class: 'lmemo' }, s ? s.title : (it.type === 'mc' ? 'MC' : (it.label || '—')), fresh ? h('i', { class: 'tag ok', style: 'margin-left:6px' }, '🆕初披露') : null),
+          it.note ? h('div', { class: 'lsub' }, it.note) : (s && s.kind === 'cover' ? h('div', { class: 'lsub' }, 'カバー' + (s.artist ? ' / ' + s.artist : '')) : null)),
+        conf ? null : h('span', { class: 'ltags', style: 'display:flex;gap:4px' },
+          h('button', { class: 'btn small ghost', style: 'padding:6px 10px;min-width:0', 'aria-label': '上へ', onclick: () => move(i, -1) }, '↑'),
+          h('button', { class: 'btn small ghost', style: 'padding:6px 10px;min-width:0', 'aria-label': '下へ', onclick: () => move(i, 1) }, '↓'),
+          h('button', { class: 'btn small ghost', style: 'padding:6px 10px;min-width:0', 'aria-label': '削除', onclick: () => { items.splice(i, 1); commit(); } }, '✕')));
+    });
+    wrap.replaceChildren(
+      h('section', { class: 'card' },
+        h('div', { class: 'cap' }, '🎵 セットリスト' + (no ? ` ${no}曲` : '') + (total ? ` ・ 約${Math.round(total / 60)}分` : '')),
+        ...(rowsEl.length ? rowsEl : [h('p', { class: 'empty' }, 'まだ曲がありません。下のボタンから追加してください。')]),
+        conf ? null : h('div', { style: 'margin-top:10px' },
+          h('button', { class: 'btn big', style: 'width:100%', onclick: addSongs }, '＋ 曲を追加'),
+          h('div', { class: 'ltags', style: 'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px' },
+            h('button', { class: 'btn small ghost', onclick: () => addOther('mc', 'MC') }, '＋ MC'),
+            h('button', { class: 'btn small ghost', onclick: () => addOther('other', '転換') }, '＋ 転換'),
+            h('button', { class: 'btn small ghost', onclick: () => addOther('other', 'SE') }, '＋ SE'),
+            h('button', { class: 'btn small ghost', onclick: () => addOther('other', 'ENCORE') }, '＋ アンコール'),
+            h('button', { class: 'btn small ghost', onclick: copyFrom }, '📄 過去からコピー')))),
+      h('p', { class: 'hint' }, '曲名の列をタップすると、メモ(短縮ver.など)を付けられます。変更は自動で保存されます。曲の一覧・回数は ', h('a', { href: '#/songs' }, '曲マスター'), ' で見られます。'));
+  }
+  draw();
+  return [wrap];
 }
 
 // ---------- Airレジ売上の取り込み ----------
@@ -1622,6 +1783,7 @@ async function route() {
   if (path === '/air') return airView();
   if (path === '/base') return baseView(q);
   if (path === '/live-list') return liveListView();
+  if (path === '/songs') return songsView();
   if (path === '/live') return liveView(q.get('id'));
   if (path === '/live-sale') return saleView('live', q.get('id'));
   if (path === '/merch') return merchView();

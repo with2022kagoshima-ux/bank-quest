@@ -289,6 +289,16 @@ const real = {
   },
   liveAirStatus: id => rest('rpc/live_air_status', { method: 'POST', body: { p_live: id } }),
   liveAirPost: (id, by) => rest('rpc/app_live_air_post', { method: 'POST', body: { p_live: id, p_by: by } }),
+  async songs() { return rest('songs?select=id,title,kind,artist,aliases,notes,duration_sec,is_active&is_active=eq.true&order=title'); },
+  async addSong(o, by) { const r = await rest('songs', { method: 'POST', prefer: 'return=representation', body: { title: o.title, kind: o.kind || 'original', artist: o.artist || null, aliases: o.aliases || null, notes: o.notes || null, duration_sec: o.duration_sec || null, created_by: by || null } }); return Array.isArray(r) ? r[0] : r; },
+  async saveSong(id, patch) { await rest(`songs?id=eq.${id}`, { method: 'PATCH', prefer: 'return=minimal', body: patch }); },
+  async setlist(liveId) { return rest(`setlist_items?select=id,position,type,song_id,label,note&live_id=eq.${liveId}&order=position`); },
+  async saveSetlist(liveId, items, by) {
+    const old = await rest(`setlist_items?select=id&live_id=eq.${liveId}`);
+    if (items.length) await rest('setlist_items', { method: 'POST', prefer: 'return=minimal', body: items.map((it, i) => ({ live_id: liveId, position: i + 1, type: it.type, song_id: it.type === 'song' ? it.song_id : null, label: it.label || null, note: it.note || null, created_by: by || null })) });
+    if (old.length) await rest(`setlist_items?id=in.(${old.map(o => o.id).join(',')})`, { method: 'DELETE', prefer: 'return=minimal' });
+  },
+  async liveSetlists() { return rest('setlist_items?select=live_id,position,type,song_id,lives(live_date,event_name)&order=live_id,position&limit=5000'); },
   async liveFiles(id) { return rest(`live_files?select=id,kind,path,name,mime&live_id=eq.${id}&order=created_at`); },
   async addLiveFile(liveId, kind, file, by) {
     const s = await freshSession();
@@ -433,7 +443,7 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]], { air_type1_role: 'color', air_type2_role: 'size' });
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5, air_type1_role: 'size', air_type2_role: null });
-  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = []; const LF = [];
+  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = []; const LF = []; const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, aliases: 'with', notes: null, duration_sec: 215, is_active: true }, { id: 's2', title: 'ゼロ', kind: 'original', artist: null, aliases: null, notes: null, duration_sec: 190, is_active: true }, { id: 's3', title: '残響', kind: 'original', artist: null, aliases: 'zankyo', notes: null, duration_sec: 240, is_active: true }]; const SI = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
   return {
@@ -466,6 +476,12 @@ function makeDemo() {
     async reimburse(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable) throw new ApiError(`返す額がWiθの未払い残(${b.payable}円)を超えています`); const r = add({ occurred_on: e.date, kind: 'reimburse', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
     async offset(e) { await wait(); const b = bal(e.party_id); if (e.amount > b.payable || e.amount > b.recv) throw new ApiError(`相殺できるのは、未払い残(${b.payable}円)と借入残(${b.recv}円)の小さい方までです`); const r = add({ occurred_on: e.date, kind: 'offset', amount: e.amount, party_id: e.party_id, memo: e.memo }); alloc(r.id, e.party_id, e.amount); },
 
+    async songs() { await wait(); return SG.filter(x => x.is_active).sort((a, b) => a.title.localeCompare(b.title)); },
+    async addSong(o) { await wait(); const x = { id: 's' + (++n), title: o.title, kind: o.kind || 'original', artist: o.artist || null, aliases: o.aliases || null, notes: o.notes || null, duration_sec: o.duration_sec || null, is_active: true }; SG.push(x); return x; },
+    async saveSong(id, patch) { await wait(); Object.assign(SG.find(x => x.id === id) || {}, patch); },
+    async setlist(liveId) { await wait(); return SI.filter(x => x.live_id === liveId).sort((a, b) => a.position - b.position).map(x => ({ ...x })); },
+    async saveSetlist(liveId, items) { await wait(); for (let i = SI.length - 1; i >= 0; i--) if (SI[i].live_id === liveId) SI.splice(i, 1); items.forEach((it, i) => SI.push({ id: 'i' + (++n), live_id: liveId, position: i + 1, type: it.type, song_id: it.type === 'song' ? it.song_id : null, label: it.label || null, note: it.note || null })); },
+    async liveSetlists() { await wait(); return SI.map(x => { const l = LV.find(v => v.id === x.live_id) || {}; return { live_id: x.live_id, position: x.position, type: x.type, song_id: x.song_id, lives: { live_date: l.live_date, event_name: l.event_name } }; }); },
     async liveFiles(id) { await wait(); return LF.filter(f => f.live_id === id); },
     async addLiveFile(liveId, kind, file) { await wait(); LF.push({ id: 'f' + (++n), live_id: liveId, kind, path: URL.createObjectURL(file), name: file.name, mime: file.type }); },
     async liveFileUrl(path) { return path; },
