@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=38';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=38';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=39';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=39';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-38'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-39'),
   ]);
 }
 
@@ -946,7 +946,9 @@ async function sendStagePlot(live, info, files) {
   const plots = files.filter(f => f.kind === 'stageplot');
   const links = (await Promise.all(plots.map(f => api.liveFileUrl(f.path, 604800).catch(() => null)))).filter(Boolean);
   const { subj, body } = stagePlotMail(live, info, links);
-  location.href = `mailto:${encodeURIComponent(live.venue_email || '')}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
+  // スマホのメールアプリは CRLF(%0D%0A) でないと改行が消えることがあるため
+  const crlf = body.replace(/\r?\n/g, '\r\n');
+  location.href = `mailto:${live.venue_email || ''}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(crlf)}`;
 }
 async function shareStagePlot(live, info, files) {
   const plots = files.filter(f => f.kind === 'stageplot');
