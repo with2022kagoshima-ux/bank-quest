@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=44';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=44';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=45';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=45';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-44'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-45'),
   ]);
 }
 
@@ -1259,7 +1259,7 @@ async function renderSetlist(headLines, entries) {
   y += 60;
   let fs = 76;
   const lhOf = f => f * 1.75, gapOf = f => f * 1.5;
-  const need = f => entries.reduce((s, e) => s + (e.gap ? gapOf(f) : lhOf(f)) + (e.note ? lhOf(f) * 0.85 : 0), 0);
+  const need = f => entries.reduce((s, e) => s + (e.gap ? gapOf(f) : e.tight ? lhOf(f) * 0.85 : lhOf(f)) + (e.note ? lhOf(f) * 0.85 : 0), 0);
   const avail = H - y - 110;
   const widest = f => { g.font = `700 ${f}px ${FONT}`; return Math.max(0, ...entries.map(e => Math.max(g.measureText(e.text || '').width, g.measureText(e.note || '').width))); };
   while ((need(fs) > avail || 250 + widest(fs) > W - 90) && fs > 24) fs -= 2;
@@ -1267,7 +1267,7 @@ async function renderSetlist(headLines, entries) {
   const xn = 235, xt = 262;
   for (const e of entries) {
     if (e.gap) { y += gap; continue; }
-    y += lh;
+    y += e.tight ? lh * 0.85 : lh;
     if (e.no != null) { g.textAlign = 'right'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.no + '.', xn, y); }
     g.textAlign = 'left'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.text, xt, y);
     if (e.note) { y += lh * 0.85; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.note, xt, y); }
@@ -1279,7 +1279,7 @@ function slEntries(items, byId) {
   for (const it of items) {
     if (it.type === 'mc') { if (out.length && !out[out.length - 1].gap) out.push({ gap: true }); continue; }
     if (it.type === 'song') { const s = byId.get(it.song_id); if (!s) continue; out.push({ no: ++no, text: s.title, note: it.note }); }
-    else out.push({ text: it.label || '', note: it.note });
+    else out.push({ text: it.label || '', note: it.note, tight: /^〜.*〜$/.test(it.label || '') });
   }
   while (out.length && out[out.length - 1].gap) out.pop();
   return out;
@@ -1353,6 +1353,19 @@ function setlistPane(l, conf, songs, items, rows, reload, info) {
     drawL();
   };
   const addOther = (type, label) => { items.push({ type, label }); commit(); };
+  const isMemo = it => it.type === 'other' && /^〜.*〜$/.test(it.label || '');
+  const memoModal = it => {
+    const inp = h('input', { type: 'text', autocomplete: 'off', placeholder: '例: ぶちあげ！！', value: it ? String(it.label).replace(/^〜|〜$/g, '') : '' });
+    const m = modal([h('h3', {}, it ? 'メモを編集' : 'メモを追加'), inp, h('p', { class: 'hint' }, '書いた文字が「〜○○〜」の形でセトリに入ります。'),
+      h('div', { class: 'row' }, h('button', { class: 'btn ghost', onclick: () => m.close() }, 'やめる'), h('button', { class: 'btn', onclick: () => {
+        const t = inp.value.trim().replace(/^[〜~～]+|[〜~～]+$/g, '').trim();
+        if (!t) { if (it) { items.splice(items.indexOf(it), 1); m.close(); commit(); } else m.close(); return; }
+        if (it) it.label = '〜' + t + '〜'; else items.push({ type: 'other', label: '〜' + t + '〜' });
+        m.close(); commit();
+      } }, '保存')),
+      it ? h('button', { class: 'btn ghost small', style: 'margin-top:8px', onclick: () => { items.splice(items.indexOf(it), 1); m.close(); commit(); } }, '🗑 削除') : null]);
+    setTimeout(() => inp.focus(), 50);
+  };
   const copyFrom = () => {
     const by = new Map();
     for (const r of rows) { if (r.live_id === l.id) continue; if (!by.has(r.live_id)) by.set(r.live_id, { d: String((r.lives && r.lives.live_date) || '').slice(0, 10), name: (r.lives && r.lives.event_name) || '', items: [] }); by.get(r.live_id).items.push(r); }
@@ -1376,7 +1389,7 @@ function setlistPane(l, conf, songs, items, rows, reload, info) {
       const fresh = s && (!x || x.firstLive === l.id);
       return h('div', { class: 'lrow', style: it.type === 'song' ? '' : 'opacity:.8' },
         h('span', { class: 'lico' }, s ? String(no) : '—'),
-        h('button', { class: 'lmain', style: 'text-align:left;background:none;border:0;color:inherit;padding:0', onclick: () => !conf && noteModal(it) },
+        h('button', { class: 'lmain', style: 'text-align:left;background:none;border:0;color:inherit;padding:0', onclick: () => !conf && (isMemo(it) ? memoModal(it) : noteModal(it)) },
           h('div', { class: 'lmemo' }, s ? s.title : (it.type === 'mc' ? 'MC' : (it.label || '—')), fresh ? h('i', { class: 'tag ok', style: 'margin-left:6px' }, '🆕初披露') : null),
           it.note ? h('div', { class: 'lsub' }, it.note) : (s && s.kind === 'cover' ? h('div', { class: 'lsub' }, 'カバー' + (s.artist ? ' / ' + s.artist : '')) : null)),
         conf ? null : h('span', { class: 'ltags', style: 'display:flex;gap:4px' },
@@ -1395,6 +1408,7 @@ function setlistPane(l, conf, songs, items, rows, reload, info) {
             h('button', { class: 'btn small ghost', onclick: () => addOther('other', '転換') }, '＋ 転換'),
             h('button', { class: 'btn small ghost', onclick: () => addOther('other', 'SE') }, '＋ SE'),
             h('button', { class: 'btn small ghost', onclick: () => addOther('other', 'ENCORE') }, '＋ アンコール'),
+            h('button', { class: 'btn small ghost', onclick: () => memoModal(null) }, '＋ メモ'),
             h('button', { class: 'btn small ghost', onclick: copyFrom }, '📄 過去からコピー')))),
       items.some(x => x.type === 'song') ? h('button', { class: 'btn big', style: 'width:100%;margin-top:4px', onclick: () => exportSetlistModal(l, info, items, byId) }, '🖼 画像・PDFで書き出す') : null,
       h('p', { class: 'hint' }, '曲名の列をタップすると、メモ(短縮ver.など)を付けられます。変更は自動で保存されます。曲の一覧・回数は ', h('a', { href: '#/songs' }, '曲マスター'), ' で見られます。'));
