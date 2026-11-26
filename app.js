@@ -1,6 +1,6 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=45';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=45';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=46';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=46';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -203,7 +203,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-45'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-46'),
   ]);
 }
 
@@ -1253,24 +1253,27 @@ async function renderSetlist(headLines, entries) {
   const FONT = '"Hiragino Kaku Gothic ProN","Hiragino Sans","Noto Sans JP","Yu Gothic",Meiryo,sans-serif';
   let y = 80;
   try { const im = await loadImg('logo-wi.png?v=41'); const lw = 270, lh = lw * im.height / im.width; g.drawImage(im, (W - lw) / 2, y, lw, lh); y += lh + 30; } catch { y += 30; }
-  g.textAlign = 'center'; g.font = `700 34px ${FONT}`;
+  g.textAlign = 'center'; g.font = `700 30px ${FONT}`;
   const lines = headLines.flatMap(t => wrapHead(g, t, W - 220));
-  for (const t of lines) { y += 58; g.fillText(t, W / 2, y); }
-  y += 60;
-  let fs = 76;
-  const lhOf = f => f * 1.75, gapOf = f => f * 1.5;
-  const need = f => entries.reduce((s, e) => s + (e.gap ? gapOf(f) : e.tight ? lhOf(f) * 0.85 : lhOf(f)) + (e.note ? lhOf(f) * 0.85 : 0), 0);
+  for (const t of lines) { y += 52; g.fillText(t, W / 2, y); }
+  y += 50;
+  let fs = 48;
+  const lhOf = f => f * 1.55, gapOf = f => f * 1.2;
+  const dOf = f => lhOf(f) * 0.95;
+  const need = f => { let t = 0, carry = 0; for (const e of entries) { if (e.gap) { t += gapOf(f); carry = 0; continue; } t += carry || (e.tight ? dOf(f) : lhOf(f)); carry = 0; if (e.note) { t += dOf(f); carry = dOf(f); } if (e.tight) carry = dOf(f); } return t; };
   const avail = H - y - 110;
   const widest = f => { g.font = `700 ${f}px ${FONT}`; return Math.max(0, ...entries.map(e => Math.max(g.measureText(e.text || '').width, g.measureText(e.note || '').width))); };
   while ((need(fs) > avail || 250 + widest(fs) > W - 90) && fs > 24) fs -= 2;
   const lh = lhOf(fs), gap = gapOf(fs);
-  const xn = 235, xt = 262;
+  const xn = 225, xt = 250;
+  const d = dOf(fs); let carry = 0;
   for (const e of entries) {
-    if (e.gap) { y += gap; continue; }
-    y += e.tight ? lh * 0.85 : lh;
+    if (e.gap) { y += gap; carry = 0; continue; }
+    y += carry || (e.tight ? d : lh); carry = 0;
     if (e.no != null) { g.textAlign = 'right'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.no + '.', xn, y); }
     g.textAlign = 'left'; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.text, xt, y);
-    if (e.note) { y += lh * 0.85; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.note, xt, y); }
+    if (e.note) { y += d; g.font = `700 ${fs}px ${FONT}`; g.fillText(e.note, xt, y); carry = d; }
+    if (e.tight) carry = d;
   }
   return c;
 }
