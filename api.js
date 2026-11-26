@@ -613,7 +613,7 @@ const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, alia
     async stockMove(m) { await wait(); const o = PR.flatMap(x => x.vars).find(x => x.id === m.variant_id); o.stock += m.qty; MV.unshift({ variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo }); },
     async stockHistory(vid) { await wait(); return MV.filter(x => x.variant_id === vid); },
     async gforms(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, message: b.action === 'check' ? 'フォーム「デモ」を読み取れました(質問 3 件)' : 'フォームに追加しました(デモ)', url: 'https://docs.google.com/forms/', id: 'x' }; },
-    async wpPublish(b) { await wait(); if (b.probe) return { ok: true, exists: false }; return b.check ? { ok: true, message: 'WordPress「デモ」として接続できました' } : { ok: true, id: '1', status: b.publish ? 'publish' : 'draft', url: 'https://example.com/?p=1', message: b.publish ? '公式サイトに公開しました(デモ)' : '公式サイトに下書きを作成しました(デモ)' }; },
+    async wpPublish(b) { await wait(); if (b.mediaOnly) return { ok: true, id: '1', url: 'https://example.com/flyer.jpg' }; if (b.probe) return { ok: true, exists: false }; return b.check ? { ok: true, message: 'WordPress「デモ」として接続できました' } : { ok: true, id: '1', status: b.publish ? 'publish' : 'draft', url: 'https://example.com/?p=1', message: b.publish ? '公式サイトに公開しました(デモ)' : '公式サイトに下書きを作成しました(デモ)' }; },
     async baseSync(action) {
       await wait();
       if (action === 'status') return { configured: true, connected: true, shop_name: 'デモショップ', mapped: 0 };

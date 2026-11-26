@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=54';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=55';
 import * as R from './rules.js?v=50';
 import { squareMaker, storyMaker } from './snsmk.js?v=50';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-54'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-55'),
   ]);
 }
 
@@ -1026,6 +1026,14 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
   const block = R.publishBlockReason(ml);
   const copy = async t => { try { await navigator.clipboard.writeText(t); toast('コピーしました', 'ok'); } catch { toast('コピーできませんでした。文章を長押ししてコピーしてください', 'err'); } };
   const save = async (k, patch) => { try { await api.saveLivePost(l.id, k, patch, state.by); reload(); } catch (e) { toast(errMsg(e), 'err'); } };
+  const flyerImage = async () => {
+    const fl = (files || []).find(f => f.kind === 'flyer' && /^image\//.test(f.mime || ''));
+    if (!fl) return undefined;
+    const bl = await (await fetch(furl.get(fl.id))).blob();
+    const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
+    const hx = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await bl.arrayBuffer()))).slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join('');
+    return { name: 'flyer-' + hx + (fl.mime === 'image/png' ? '.png' : '.jpg'), mime: fl.mime, b64 };
+  };
   const sendWp = async (c, p, publish) => {
     if (block) { toast(block, 'err'); return; }
     const ok = await confirmBox(publish ? '公式サイトに公開しますか？' : '公式サイトに下書きを送りますか？', (publish ? '公開すると、すぐに公式サイトに表示されます。' : '下書きとして作成します(公開はされません)。同じタイトルの投稿があれば、その内容を更新します。') + '\nタイトル: ' + (c.title || ''), publish ? '公開する' : '下書きを送る');
@@ -1035,14 +1043,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       if (pr.exists && pr.status === 'publish' && !(await confirmBox('すでに公開されています', '公式サイトに同じライブのページが公開中です。このまま送ると、公開中のページの内容が書き換わります(下書きにはなりません)。', '上書きする'))) return;
     } catch (e) { toast(errMsg(e), 'err'); return; }
     try {
-      let image;
-      const fl = (files || []).find(f => f.kind === 'flyer' && /^image\//.test(f.mime || ''));
-      if (fl) {
-        const bl = await (await fetch(furl.get(fl.id))).blob();
-        const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
-        const hx = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await bl.arrayBuffer()))).slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join('');
-        image = { name: 'flyer-' + hx + (fl.mime === 'image/png' ? '.png' : '.jpg'), mime: fl.mime, b64 };
-      }
+      const image = await flyerImage();
       const j = await api.wpPublish({ title: c.title, content: c.body, publish, kind: 'live', image });
       const hist = [...(p?.history || []), { at: new Date().toISOString(), status: j.status === 'publish' ? 'success' : 'draft', url: j.url, id: j.id, by: state.by || null }].slice(-30);
       await api.saveLivePost(l.id, 'wordpress', { status: j.status === 'publish' ? 'success' : 'draft', history: hist }, state.by);
@@ -1053,7 +1054,9 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     if (block) { toast(block, 'err'); return; }
     if (!(await confirmBox('予約フォームに追加しますか？', 'チケット予約のGoogleフォームに、この公演の質問を日付順の位置に追加します。同じ公演がすでにあれば追加しません。', '追加する'))) return;
     try {
-      const j = await api.gforms({ action: 'add', title: c.title, body: c.body, options: c.options, required: !!c.required, dateKey: R.formDateKey(String(l.live_date || '').slice(0, 10)), venue: R.venuePlainName(ml) });
+      let imageUrl = '';
+      try { const im = await flyerImage(); if (im) { const m = await api.wpPublish({ mediaOnly: true, image: im }); imageUrl = (m && m.url) || ''; } } catch (e) { toast('フライヤー画像を用意できなかったため、画像なしで追加します', 'err'); }
+      const j = await api.gforms({ action: 'add', imageUrl, title: c.title, body: c.body, options: c.options, required: !!c.required, dateKey: R.formDateKey(String(l.live_date || '').slice(0, 10)), venue: R.venuePlainName(ml) });
       const hist = [...(p?.history || []), { at: new Date().toISOString(), status: 'success', url: j.url, id: j.id || '', by: state.by || null }].slice(-30);
       await api.saveLivePost(l.id, 'googleForm', { status: 'success', history: hist }, state.by);
       toast(j.message, 'ok'); reload();
