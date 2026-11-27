@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-64'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-65'),
   ]);
 }
 
@@ -1233,7 +1233,7 @@ function suggestFor(t, targets, d, saved) {
   const out = [];
   for (const c of raw) {
     const sim = TS.matchScore(t.name, c.username, c.name);
-    if (!(['登録済み', '会場欄'].includes(c.source) || (sim >= 45 && !otherBetter(c.username, c.name, sim)))) continue;
+    if (!(['登録済み', '会場欄'].includes(c.source) || (sim >= (c.source === 'Web検索' ? 20 : 45) && !otherBetter(c.username, c.name, sim)))) continue;
     out.push({ ...c, sim, score: (SRC_BASE[c.source] || 0) + sim * 3 + (c.web || 0) + (c.exists === true ? 20 : 0) + (c.followers ? Math.min(20, Math.log10(c.followers + 1) * 5) : 0) });
   }
   out.sort((a, b) => b.score - a.score);
@@ -1272,6 +1272,7 @@ function tagPanel(k, ml, bodyEl) {
   };
   const checkOn = (r) => { if (!r.it.h) return; r.mc.checked = true; addM(r.it, r.it.h); if (r.pc) r.pc.checked = true; };
   const drawCands = (r, cands) => {
+    if (!cands.length) { r.cbox.replaceChildren(h('span', { class: 'lsub' }, '候補が見つかりませんでした(名前で探すか、手入力してください)')); return; }
     r.cbox.replaceChildren(...cands.map(c => h('button', { type: 'button', class: 'btn small ghost', style: 'display:flex;gap:6px;align-items:center;text-align:left;margin:2px 4px 2px 0', onclick: async () => { await setHandle(r, c.username); checkOn(r); drawCands(r, cands); } },
       c.pic ? h('img', { src: c.pic, alt: '', referrerpolicy: 'no-referrer', style: 'width:28px;height:28px;border-radius:50%;object-fit:cover' }) : h('span', {}, '@'),
       h('span', {}, h('b', {}, (r.it.h && c.username.toLowerCase() === r.it.h.toLowerCase() ? '✔ ' : '') + '@' + c.username), h('br'), h('span', { class: 'lsub' }, [c.name, c.followers != null ? fmtFol(c.followers) + '人' : '', c.source].filter(Boolean).join(' · '))))));
