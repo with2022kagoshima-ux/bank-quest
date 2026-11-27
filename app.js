@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=70';
 import * as R from './rules.js?v=50';
-import { squareMaker, storyMaker } from './snsmk.js?v=76';
+import { squareMaker, storyMaker } from './snsmk.js?v=77';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=70';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-76'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-77'),
   ]);
 }
 
@@ -1429,9 +1429,9 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     const hx = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await bl.arrayBuffer()))).slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join('');
     return { name: 'flyer-' + hx + (fl.mime === 'image/png' ? '.png' : '.jpg'), mime: fl.mime, b64 };
   };
-  const sendWp = async (c, p, publish) => {
+  const sendWp = async (c, p, publish, publishAt) => {
     if (block) { toast(block, 'err'); return; }
-    const ok = await confirmBox(publish ? '公式サイトに公開しますか？' : '公式サイトに下書きを送りますか？', (publish ? '公開すると、すぐに公式サイトに表示されます。' : '下書きとして作成します(公開はされません)。同じタイトルの投稿があれば、その内容を更新します。') + '\nタイトル: ' + (c.title || ''), publish ? '公開する' : '下書きを送る');
+    const ok = await confirmBox(publishAt ? '公式サイトに予約公開しますか？' : publish ? '公式サイトに公開しますか？' : '公式サイトに下書きを送りますか？', (publishAt ? new Date(publishAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' に自動で公開されます。それまでは公式サイトに表示されません。' : publish ? '公開すると、すぐに公式サイトに表示されます。' : '下書きとして作成します(公開はされません)。同じタイトルの投稿があれば、その内容を更新します。') + '\nタイトル: ' + (c.title || ''), publishAt ? '予約する' : publish ? '公開する' : '下書きを送る');
     if (!ok) return;
     try {
       const pr = await api.wpPublish({ title: c.title, content: c.body, kind: 'live', probe: true });
@@ -1439,11 +1439,28 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     } catch (e) { toast(errMsg(e), 'err'); return; }
     try {
       const image = await flyerImage();
-      const j = await api.wpPublish({ title: c.title, content: c.body, publish, kind: 'live', image });
+      const j = await api.wpPublish({ title: c.title, content: c.body, publish, publishAt, kind: 'live', image });
       const hist = [...(p?.history || []), { at: new Date().toISOString(), status: j.status === 'publish' ? 'success' : 'draft', url: j.url, id: j.id, by: state.by || null }].slice(-30);
       await api.saveLivePost(l.id, 'wordpress', { status: j.status === 'publish' ? 'success' : 'draft', history: hist }, state.by);
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
+  };
+  const schedWp = (c, p) => {
+    if (block) { toast(block, 'err'); return; }
+    const d0 = new Date(Date.now() + 86400000); const pad = n => String(n).padStart(2, '0');
+    const when = h('input', { type: 'datetime-local', value: d0.getFullYear() + '-' + pad(d0.getMonth() + 1) + '-' + pad(d0.getDate()) + 'T19:00' });
+    const m = modal([
+      h('h3', {}, '公式サイトに予約公開'),
+      h('p', { class: 'muted' }, '指定した日時に、WordPressが自動で公開します（このアプリを開いていなくても大丈夫です）。公開前は、WordPressの管理画面で日時の変更や取り消しができます。'),
+      field('公開する日時', when),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn ghost', onclick: () => m.close() }, 'やめる'),
+        h('button', { class: 'btn', onclick: () => {
+          const at = new Date(when.value);
+          if (!when.value || isNaN(at)) { toast('日時を入れてください', 'err'); return; }
+          if (at.getTime() < Date.now() + 2 * 60000) { toast('2分以上先の日時にしてください', 'err'); return; }
+          m.close(); sendWp(c, p, false, at.toISOString());
+        } }, '予約する'))]);
   };
   const sendGf = async (c, p) => {
     if (block) { toast(block, 'err'); return; }
@@ -1584,6 +1601,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         def.openUrl ? h('a', { class: 'btn small ghost', href: def.openUrl, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '開く') : null,
         k === 'wordpress' && !conf ? h('button', { class: 'btn small', onclick: () => sendWp(c, p, false) }, '🌐 下書きを送る') : null,
         k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => sendWp(c, p, true) }, '公開して送る') : null,
+        k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedWp(c, p) }, '🕒 予約公開') : null,
         k === 'wordpress' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.wpPublish({ check: true })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
