@@ -44,6 +44,14 @@ export const LAYOUTS = {
     top: { y0: 180, y1: 390 },
     bottom: { y0: 1460, y1: 1625 },
   },
+  many: {
+    label: '出演者多数',
+    desc: '出演者が多いとき。投稿を小さくして、ACTを複数列で大きく',
+    post: { x: 260, y: 400, size: 560 },
+    top: { y0: 150, y1: 380 },
+    bottom: { y0: 1070, y1: 1625 },
+    many: true,
+  },
 };
 export const BACKGROUNDS = {
   blur: 'フライヤーをぼかす',
@@ -186,8 +194,26 @@ function drawBlock(ctx, placed, cx, y0, y1, valign = 'center') {
 }
 const lines = (txt, first, rest) => String(txt || '').split('\n').map((t, i) => ({ text: t.trim(), size: i === 0 ? first : rest }));
 
+function drawMany(ctx, o, area) {
+  const { y0, y1 } = area;
+  const split = (t) => String(t || '').split('\n').map((x) => x.trim()).filter(Boolean);
+  const [head, ...names] = split(o.left);
+  const tk = split(o.right); const tHead = (tk.shift() || '').replace(/^-+|-+$/g, '');
+  const tkLine = tk.length ? `-${tHead || 'TICKET'}-  ${tk.join(' / ')}` : '';
+  const tkH = tkLine ? 90 : 0;
+  const cols = names.length > 14 ? 3 : 2, rows = Math.ceil(names.length / cols);
+  const hh = 70;
+  textLine(ctx, head || '-ACT-', STORY_W / 2, y0, 52);
+  const colW = STORY_W / cols;
+  const blocks = [];
+  for (let c = 0; c < cols; c++) blocks.push(layoutBlock(ctx, lines(names.slice(c * rows, (c + 1) * rows).join('\n'), 50, 50), colW - 40, y1 - y0 - hh - tkH));
+  const size = Math.min(...blocks.flat().map((p) => p.size), 54);
+  blocks.forEach((b, c) => drawBlock(ctx, b.map((p) => ({ ...p, size, h: Math.round(size * 1.3) })), colW * (c + 0.5), y0 + hh, y1 - tkH, 'top'));
+  if (tkLine) { const [p] = layoutBlock(ctx, [{ text: tkLine, size: 46 }], 980, 80); if (p) textLine(ctx, p.text, STORY_W / 2, y1 - 62, p.size); }
+}
 function drawBottom(ctx, o, area) {
   const { y0, y1 } = area;
+  if (area.many && o.bottomMode === 'columns') return drawMany(ctx, o, area);
   if (o.bottomMode === 'columns' && y1 - y0 < 200) {
     // 場所が狭い構図では、ACT と TICKET を1行ずつにまとめる
     const one = (txt) => { const [h, ...r] = String(txt || '').split('\n').map((t) => t.trim()).filter(Boolean); return r.length ? `${h.replace(/^-+|-+$/g, '')}：${r.join(' / ')}` : ''; };
@@ -254,7 +280,7 @@ export function composeStory(o) {
   } else {
     drawBlock(ctx, layoutBlock(ctx, lines(o.top, 60, 50), 960, L.top.y1 - L.top.y0), STORY_W / 2, L.top.y0, L.top.y1, 'bottom');
   }
-  drawBottom(ctx, o, L.bottom);
+  drawBottom(ctx, o, { ...L.bottom, many: L.many });
 
   if (o.guides) {
     const p = L.post;
