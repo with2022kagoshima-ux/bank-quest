@@ -75,9 +75,14 @@ function drawSoft(ctx, r) {
   if (!(r > 0)) return;
   const tmp = document.createElement('canvas'); tmp.width = STORY_W; tmp.height = STORY_H;
   tmp.getContext('2d').drawImage(ctx.canvas, 0, 0);
-  const small = softCanvas(tmp, r);
+  let cur = softCanvas(tmp, r);
+  // 少しずつ拡大して、カクカクしないようにする
+  while (cur.width * 1.6 < STORY_W) {
+    const c = document.createElement('canvas'); c.width = Math.round(cur.width * 1.6); c.height = Math.round(cur.height * 1.6);
+    const x = c.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(cur, 0, 0, c.width, c.height); cur = c;
+  }
   ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  const m = Math.min(40, r); ctx.drawImage(small, -m, -m, STORY_W + m * 2, STORY_H + m * 2); ctx.restore();
+  const m = Math.min(40, r); ctx.drawImage(cur, -m, -m, STORY_W + m * 2, STORY_H + m * 2); ctx.restore();
 }
 function drawBackground(ctx, o) {
   const sq = o.squareColors || o.colors;
@@ -108,7 +113,7 @@ function drawBackground(ctx, o) {
     ctx.fillRect(0, 0, STORY_W, STORY_H);
   } else {
     cover(ctx, o.flyer, 1.25);
-    drawSoft(ctx, Number.isFinite(o.soften) ? o.soften * 2.5 : 60);
+    drawSoft(ctx, Number.isFinite(o.soften) ? o.soften * 1.5 : 36);
     ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, STORY_W, STORY_H);
   }
   // 上下を少し暗く（文字を読みやすく）
