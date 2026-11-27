@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-65'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-66'),
   ]);
 }
 
@@ -1242,6 +1242,7 @@ function suggestFor(t, targets, d, saved) {
   const auto = !saved && !t.venueHandle && cands[0] && byHandle(cands[0]) && (cands[0].exists === true || (cands[0].exists === null && cands[0].web > 0)) && !cands.slice(1).some(byHandle) ? cands[0].username : '';
   return { cands, auto };
 }
+const TAGSTATE = new Map(); const ANN_OPEN = new Set();
 function tagPanel(k, ml, bodyEl) {
   const isIg = k === 'instagram';
   const key = isIg ? 'ig' : 'x';
@@ -1250,6 +1251,9 @@ function tagPanel(k, ml, bodyEl) {
   const items = [...names.map(n => ({ name: n, h: '', kind: 'act' })), ...(vn ? [{ name: vn, h: R.venueHandle(ml) || '', venue: true, kind: 'venue' }] : [])];
   const el = h('div', { class: 'tagpanel', style: 'margin:8px 0' }, h('div', { class: 'lsub' }, '👥 タグ付け・メンション(読み込み中…)'));
   const rows = [];
+  const sk = k + '|' + items.map(i => i.name).join('|');
+  if (!TAGSTATE.has(sk)) TAGSTATE.set(sk, { photo: new Set() });
+  const st = TAGSTATE.get(sk);
   const hasM = (hd) => !!hd && new RegExp('@' + reEsc(hd) + '(?![A-Za-z0-9._])', 'i').test(bodyEl.value);
   const fire = () => bodyEl.dispatchEvent(new Event('change', { bubbles: true }));
   const addM = (it, hd) => {
@@ -1270,7 +1274,7 @@ function tagPanel(k, ml, bodyEl) {
     if (!nh && !b[kk].ig && !b[kk].x) delete b[kk];
     api.saveAccountBook(b);
   };
-  const checkOn = (r) => { if (!r.it.h) return; r.mc.checked = true; addM(r.it, r.it.h); if (r.pc) r.pc.checked = true; };
+  const checkOn = (r) => { if (!r.it.h) return; r.mc.checked = true; addM(r.it, r.it.h); if (r.pc) { r.pc.checked = true; st.photo.add(r.it.h.toLowerCase()); } };
   const drawCands = (r, cands) => {
     if (!cands.length) { r.cbox.replaceChildren(h('span', { class: 'lsub' }, '候補が見つかりませんでした(名前で探すか、手入力してください)')); return; }
     r.cbox.replaceChildren(...cands.map(c => h('button', { type: 'button', class: 'btn small ghost', style: 'display:flex;gap:6px;align-items:center;text-align:left;margin:2px 4px 2px 0', onclick: async () => { await setHandle(r, c.username); checkOn(r); drawCands(r, cands); } },
@@ -1290,17 +1294,22 @@ function tagPanel(k, ml, bodyEl) {
       rows.push(row);
       inp.addEventListener('change', () => setHandle(row, inp.value));
       mc.addEventListener('change', () => { if (!it.h) { mc.checked = false; toast('先に@アカウントを入れてください', 'err'); return; } mc.checked ? addM(it, it.h) : delM(it.h); });
-      if (pc) pc.addEventListener('change', () => { if (!it.h) { pc.checked = false; toast('先に@アカウントを入れてください', 'err'); } });
+      if (pc) pc.addEventListener('change', () => { if (!it.h) { pc.checked = false; toast('先に@アカウントを入れてください', 'err'); return; } if (pc.checked) st.photo.add(it.h.toLowerCase()); else st.photo.delete(it.h.toLowerCase()); });
       el.append(h('div', { class: 'row', style: 'gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0' },
         h('span', { style: 'min-width:90px' }, it.name), inp,
         h('label', { class: 'lsub' }, mc, ' 本文に@'), pc ? h('label', { class: 'lsub' }, pc, ' 写真にタグ') : null), cbox);
     }
+    rows.forEach((r, i) => {
+      if (r.pc && r.it.h && st.photo.has(r.it.h.toLowerCase())) r.pc.checked = true;
+      if (st.d && st.targets[i]) drawCands(r, suggestFor(st.targets[i], st.targets, st.d, r.it.h).cands);
+    });
     const find = h('button', { type: 'button', class: 'btn small', onclick: async () => {
       find.disabled = true; const old = find.textContent; find.textContent = '探しています…(少しかかります)';
       try {
         const targets = rows.map(r => ({ name: r.it.name, kind: r.it.kind, raw: r.it.name, venueHandle: r.it.venue ? (R.venueHandle(ml) || '') : '', guesses: TS.guessHandles(r.it.name) }));
         const need = targets.filter((t, i) => !rows[i].it.h);
         const d = await api.igpost({ action: 'discover', targets: need.map(t => ({ name: t.name, kind: t.kind, raw: t.raw, guesses: t.guesses })) });
+        st.d = d; st.targets = targets;
         const picked = [];
         for (const [i, r] of rows.entries()) {
           const t = targets[i];
@@ -1414,7 +1423,8 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     if (sns) body.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
     if (tags) tags.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
     const sel = h('select', { class: 'sel', onchange: e => save(k, { status: e.target.value, history: [...(p?.history || []), { at: new Date().toISOString(), status: e.target.value, by: state.by || null }].slice(-30) }) }, ANN_STATUS.map(s => h('option', { value: s, selected: s === st ? true : null }, R.STATUS[s].label)));
-    return h('details', { class: 'card ann' },
+    const dk = l.id + '|' + k;
+    const det = h('details', { class: 'card ann', open: ANN_OPEN.has(dk) ? true : null },
       h('summary', {}, h('b', {}, def.name), ' ', h('i', { class: 'tag ' + (st === 'manualDone' ? 'ok' : st === 'skipped' ? 'dead' : 'mid') }, R.STATUS[st].label), p?.edited ? h('i', { class: 'tag' }, '編集済み') : null),
       k === 'youtube' || k === 'wordpress' || k === 'googleForm' ? h('div', { class: 'lsub' }, 'タイトル: ' + (c.title || '')) : null,
       body, tags ? field('ハッシュタグ', tags) : null, tp ? tp.el : null,
@@ -1440,6 +1450,8 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
       (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x' || k === 'instagram') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
+    det.addEventListener('toggle', () => { if (det.open) ANN_OPEN.add(dk); else ANN_OPEN.delete(dk); });
+    return det;
   });
   return h('section', { class: 'card' }, h('div', { class: 'cap' }, '📝 投稿先ごとの文章と進行'),
     h('p', { class: 'hint' }, '上の情報から、投稿先ごとの文章を自動で作ります。コピーして各サービスに貼り、投稿したら状態を「手動で完了」にしてください。'),
