@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=77';
-import * as R from './rules.js?v=79';
-import { squareMaker, storyMaker } from './snsmk.js?v=79';
+import * as R from './rules.js?v=80';
+import { squareMaker, storyMaker } from './snsmk.js?v=80';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=77';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-79'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-80'),
   ]);
 }
 
@@ -1639,6 +1639,13 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => sendWp(c, p, true) }, '公開して送る') : null,
         k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedWp(c, p) }, '🕒 予約公開') : null,
         k === 'wordpress' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.wpPublish({ check: true })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
+        k === 'bandsintown' ? h('button', { class: 'btn small', onclick: () => {
+          try {
+            const f = new File([R.bandsintownCsv(ml)], 'bandsintown-' + String(l.live_date || '').slice(0, 10) + '.csv', { type: 'text/csv' });
+            const aEl = h('a', { href: URL.createObjectURL(f), download: f.name }); document.body.append(aEl); aEl.click(); aEl.remove();
+            toast('CSVを作りました。Bandsintown for Artists の Events > Upload からアップロードしてください（下書きとして入ります）', 'ok');
+          } catch (e) { toast(errMsg(e), 'err'); }
+        } }, '📄 アップロード用CSV') : null,
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
         k === 'googleForm' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedGf(c, p) }, '🕒 予約して追加') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
