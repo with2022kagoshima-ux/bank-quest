@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-63'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-64'),
   ]);
 }
 
@@ -1239,7 +1239,7 @@ function suggestFor(t, targets, d, saved) {
   out.sort((a, b) => b.score - a.score);
   const cands = out.slice(0, 6);
   const byHandle = c => TS.matchScore(t.name, c.username, '') >= 95;
-  const auto = !saved && !t.venueHandle && cands[0] && byHandle(cands[0]) && cands[0].exists === true && !cands.slice(1).some(byHandle) ? cands[0].username : '';
+  const auto = !saved && !t.venueHandle && cands[0] && byHandle(cands[0]) && (cands[0].exists === true || (cands[0].exists === null && cands[0].web > 0)) && !cands.slice(1).some(byHandle) ? cands[0].username : '';
   return { cands, auto };
 }
 function tagPanel(k, ml, bodyEl) {
