@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=56';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=57';
 import * as R from './rules.js?v=50';
 import { squareMaker, storyMaker } from './snsmk.js?v=50';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/26-56'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-57'),
   ]);
 }
 
@@ -1080,6 +1080,28 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
+  const sendIg = async (c, p, bodyEl, tagsEl, format) => {
+    if (block) { toast(block, 'err'); return; }
+    const isStory = format === 'story';
+    const fl = isStory
+      ? [...(files || [])].reverse().find(f => f.kind === 'story' && /^image\//.test(f.mime || ''))
+      : ([...(files || [])].reverse().find(f => f.kind === 'square' && /^image\//.test(f.mime || '')) || (files || []).find(f => f.kind === 'flyer' && /^image\//.test(f.mime || '')));
+    if (!fl) { toast(isStory ? '先に「ストーリー下地を作る」でストーリー画像を作ってください' : '先に正方形(またはフライヤー)の画像を用意してください', 'err'); return; }
+    if (fl.mime !== 'image/jpeg') { toast('Instagramに送れるのはJPEG画像だけです。この画像はJPEGではありません', 'err'); return; }
+    const caption = R.composeText('instagram', { ...c, body: bodyEl.value, hashtags: tagsEl ? tagsEl.value : c.hashtags });
+    if (!(await confirmBox(isStory ? 'Instagramのストーリーに投稿しますか？' : 'Instagramのフィードに投稿しますか？', 'すぐに公開されます(取り消しはInstagramで行います)。\n画像: ' + (fl.name || (fl.kind === 'story' ? 'ストーリー' : fl.kind === 'square' ? '正方形' : 'フライヤー')) + (isStory ? '\n(ストーリーには文章は付きません)' : '\n\n' + caption.slice(0, 200) + (caption.length > 200 ? '…' : '')), '投稿する'))) return;
+    try {
+      const bl = await (await fetch(furl.get(fl.id))).blob();
+      const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
+      const hx = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await bl.arrayBuffer()))).slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join('');
+      const m = await api.wpPublish({ mediaOnly: true, image: { name: 'ig-' + hx + '.jpg', mime: 'image/jpeg', b64 } });
+      if (!m || !m.url) throw new Error('画像を公式サイトのメディアに置けませんでした');
+      const j = await api.igpost({ action: 'post', format: isStory ? 'story' : 'feed', imageUrl: m.url, caption });
+      const hist = [...(p?.history || []), { at: new Date().toISOString(), status: 'success', url: j.url, id: j.id || '', by: state.by || null }].slice(-30);
+      await api.saveLivePost(l.id, 'instagram', { status: 'success', history: hist }, state.by);
+      toast(j.message, 'ok'); reload();
+    } catch (e) { toast(errMsg(e), 'err'); }
+  };
   const cards = ANN_DESTS.map(k => {
     const def = R.getDestination(k); const gen = R.generateContent(ml, k); const p = pm.get(k);
     const c = p && p.edited ? { ...gen, body: p.body ?? gen.body, hashtags: p.hashtags ?? gen.hashtags } : gen;
@@ -1106,11 +1128,14 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.gforms({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
+        k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'feed') }, '📷 フィードに投稿') : null,
+        k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'story') }, '📱 ストーリーに投稿') : null,
+        k === 'instagram' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.igpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'x' && !conf ? h('button', { class: 'btn small', onclick: () => sendX(c, p, body, tags) }, '𝕏 に投稿する') : null,
         k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.xpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Xと連携する') : null,
         k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.xpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
-      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
+      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x' || k === 'instagram') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
   });
   return h('section', { class: 'card' }, h('div', { class: 'cap' }, '📝 投稿先ごとの文章と進行'),
