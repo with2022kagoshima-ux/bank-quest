@@ -59,6 +59,8 @@ export const BACKGROUNDS = {
   patternInvert: 'いつもの柄（正方形の反転色）',
   pattern: 'いつもの柄（フライヤーの色）',
   color: 'フライヤーの色のグラデーション',
+  solid: '単色（フライヤーの色）',
+  black: '単色（黒）',
 };
 
 // ---- 背景 ----
@@ -111,6 +113,9 @@ function drawBackground(ctx, o) {
     ctx.putImageData(id, 0, 0);
     // 柄をぼかす（0なら、くっきりのまま）
     drawSoft(ctx, o.soften);
+  } else if (o.bg === 'solid' || o.bg === 'black') {
+    ctx.fillStyle = o.bg === 'black' ? '#0b0b0d' : `rgb(${a.map((v) => Math.round(v * 0.5)).join(',')})`;
+    ctx.fillRect(0, 0, STORY_W, STORY_H);
   } else if (o.bg === 'color') {
     const g = ctx.createLinearGradient(0, 0, STORY_W * 0.3, STORY_H);
     const dark = (c, k) => `rgb(${c.map((v) => Math.round(v * k)).join(',')})`;

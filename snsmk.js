@@ -1,6 +1,6 @@
 // SNS用画像づくり(正方形・ストーリー下地)。managerの square.js / story.js を使う
 import { analyzeColors, composeSquare, toHex } from './square.js?v=50';
-import { composeStory, storyDefaults, defaultDim, colorsFromSquare, LAYOUTS, BACKGROUNDS } from './story.js?v=75';
+import { composeStory, storyDefaults, defaultDim, colorsFromSquare, LAYOUTS, BACKGROUNDS } from './story.js?v=76';
 import * as R from './rules.js?v=50';
 
 const loadImg = (src) => new Promise((ok, ng) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => ok(i); i.onerror = () => ng(new Error('画像を読み込めませんでした')); i.src = src; });
