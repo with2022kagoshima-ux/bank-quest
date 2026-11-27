@@ -340,6 +340,14 @@ const real = {
     return rows.map(r => ({ ...r, id: r.live_id, income: Number(r.income), expense: Number(r.expense), profit: Number(r.profit),
       venue_name: r.venue_id && vm.get(r.venue_id) ? vm.get(r.venue_id).name : '', venue_email: r.venue_id && vm.get(r.venue_id) ? vm.get(r.venue_id).email || '' : '', memo: (lm.get(r.live_id) || {}).memo || '', score: (lm.get(r.live_id) || {}).score || null }));
   },
+  async accountBook() {
+    try { const r = await rest('settings?select=value&key=eq.sns_accounts'); const v = r[0] && r[0].value; if (v) return typeof v === 'string' ? JSON.parse(v) : v; } catch { /* 端末内の控えを使う */ }
+    try { return JSON.parse(localStorage.getItem('bq_sns_accounts') || '{}'); } catch { return {}; }
+  },
+  async saveAccountBook(b) {
+    try { localStorage.setItem('bq_sns_accounts', JSON.stringify(b)); } catch { /* 保存できなくても続ける */ }
+    try { await rest('settings?on_conflict=key', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: { key: 'sns_accounts', value: b } }); } catch { /* 共有の保存ができない時は端末内だけ */ }
+  },
   liveRating: async () => { const r = await rest('settings?select=value&key=eq.live_rating'); return r[0] ? r[0].value : null; },
   venues: () => rest('venues?select=id,name,prefecture&order=name'),
   async _venueId(name, pref) {
@@ -632,6 +640,8 @@ const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, alia
     async addProduct(f) { await wait(); mkp(f.name, f.category || null, [[f.size || null, f.color || null, f.price, f.cost, 0]]); },
     async stockMove(m) { await wait(); const o = PR.flatMap(x => x.vars).find(x => x.id === m.variant_id); o.stock += m.qty; MV.unshift({ variant_id: m.variant_id, qty: m.qty, reason: m.reason, occurred_on: m.date, memo: m.memo }); },
     async stockHistory(vid) { await wait(); return MV.filter(x => x.variant_id === vid); },
+    async accountBook() { return JSON.parse(localStorage.getItem('bq_sns_accounts') || '{}'); },
+    async saveAccountBook(b) { localStorage.setItem('bq_sns_accounts', JSON.stringify(b)); },
     async igpost(b) { await wait(); return { ok: true, id: '1', url: 'https://www.instagram.com/', message: b.action === 'check' ? 'Instagram「@demo」に接続できました' : 'Instagramに公開しました(デモ)' }; },
     async xpost(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, id: '1', url: 'https://x.com/', message: b.action === 'check' ? 'X「@demo」として接続できました' : 'Xに投稿しました(デモ)' }; },
     async gforms(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, message: b.action === 'check' ? 'フォーム「デモ」を読み取れました(質問 3 件)' : 'フォームに追加しました(デモ)', url: 'https://docs.google.com/forms/', id: 'x' }; },

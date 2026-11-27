@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=58';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=59';
 import * as R from './rules.js?v=50';
 import { squareMaker, storyMaker } from './snsmk.js?v=50';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-58'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-59'),
   ]);
 }
 
@@ -1020,6 +1020,60 @@ function snsImageSec(l, info, conf, files, furl, reload) {
     files.some(f => f.kind === 'square') ? h('div', {}, h('div', { class: 'cap sec' }, '正方形'), liveFileBlock(l, files, furl, 'square', true, reload)) : null,
     files.some(f => f.kind === 'story') ? h('div', {}, h('div', { class: 'cap sec' }, 'ストーリー'), liveFileBlock(l, files, furl, 'story', true, reload)) : null);
 }
+
+// ---- タグ付け・メンション(Instagram・X)：名前→@アカウントを覚えて、本文に@・写真タグを付ける
+const normName = (s) => String(s || '').normalize('NFKC').toLowerCase().replace(/[（(][^）)]*[）)]/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+let bookP = null;
+const getBook = () => (bookP = bookP || api.accountBook().catch(() => ({})));
+const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function tagPanel(k, ml, bodyEl) {
+  const isIg = k === 'instagram';
+  const key = isIg ? 'ig' : 'x';
+  const names = R.performersOf(ml).filter(n => !/and\s*more/i.test(n));
+  const vn = R.venuePlainName(ml);
+  const items = [...names.map(n => ({ name: n, h: '' })), ...(vn ? [{ name: vn, h: R.venueHandle(ml) || '', venue: true }] : [])];
+  const el = h('div', { class: 'tagpanel', style: 'margin:8px 0' }, h('div', { class: 'lsub' }, '👥 タグ付け・メンション(読み込み中…)'));
+  const rows = [];
+  const hasM = (hd) => !!hd && new RegExp('@' + reEsc(hd) + '(?![A-Za-z0-9._])', 'i').test(bodyEl.value);
+  const fire = () => bodyEl.dispatchEvent(new Event('change', { bubbles: true }));
+  const addM = (it, hd) => {
+    if (!hd || hasM(hd)) return;
+    const lines = bodyEl.value.split('\n'); const kk = normName(it.name);
+    let i = lines.findIndex(l => normName(l) === kk);
+    if (i < 0) i = lines.findIndex((l, n) => n > 0 && kk && normName(l).includes(kk));
+    if (i >= 0) lines[i] = lines[i].replace(/\s+$/, '') + ' @' + hd; else lines.push('@' + hd);
+    bodyEl.value = lines.join('\n'); fire();
+  };
+  const delM = (hd) => { if (!hd) return; bodyEl.value = bodyEl.value.replace(new RegExp('[ \\t]?@' + reEsc(hd) + '(?![A-Za-z0-9._])', 'gi'), ''); fire(); };
+  getBook().then(book => {
+    el.replaceChildren(h('div', { class: 'lsub' }, '👥 タグ付け・メンション：名前のとなりに@アカウントを入れると覚えます。' + (isIg ? '「写真にタグ」は正方形・フライヤー投稿のときだけ付きます。' : '')));
+    for (const it of items) {
+      const rec = book[normName(it.name)] || {};
+      it.h = it.h || rec[key] || '';
+      const inp = h('input', { type: 'text', autocomplete: 'off', placeholder: '@アカウント名', value: it.h ? '@' + it.h : '', style: 'flex:1;min-width:120px' });
+      const mc = h('input', { type: 'checkbox' }); mc.checked = hasM(it.h);
+      const pc = isIg ? h('input', { type: 'checkbox' }) : null; if (pc) pc.checked = false;
+      const row = { it, inp, mc, pc };
+      rows.push(row);
+      inp.addEventListener('change', async () => {
+        const nh = inp.value.trim().replace(/^@/, '').replace(/[^A-Za-z0-9._]/g, '');
+        if (it.h && hasM(it.h)) { delM(it.h); if (nh) addM(it, nh); }
+        it.h = nh; inp.value = nh ? '@' + nh : ''; mc.checked = hasM(nh);
+        const b = await getBook(); const kk = normName(it.name); b[kk] = { ...(b[kk] || {}), name: it.name, [key]: nh };
+        if (!nh && !b[kk].ig && !b[kk].x) delete b[kk];
+        api.saveAccountBook(b);
+      });
+      mc.addEventListener('change', () => { if (!it.h) { mc.checked = false; toast('先に@アカウントを入れてください', 'err'); return; } mc.checked ? addM(it, it.h) : delM(it.h); });
+      if (pc) pc.addEventListener('change', () => { if (!it.h) { pc.checked = false; toast('先に@アカウントを入れてください', 'err'); } });
+      el.append(h('div', { class: 'row', style: 'gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0' },
+        h('span', { style: 'min-width:90px' }, it.name), inp,
+        h('label', { class: 'lsub' }, mc, ' 本文に@'), pc ? h('label', { class: 'lsub' }, pc, ' 写真にタグ') : null));
+    }
+    el.append(h('div', { class: 'row', style: 'gap:8px;margin-top:4px' }, h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const r of rows) if (r.it.h) { r.mc.checked = true; addM(r.it, r.it.h); if (r.pc) r.pc.checked = true; } } }, 'アカウントがある人を全部チェック'),
+      h('a', { class: 'btn small ghost', href: (isIg ? 'https://www.google.com/search?q=' : 'https://x.com/search?f=user&q=') + encodeURIComponent((names[0] || '') + (isIg ? ' instagram' : '')), target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '名前で探す ↗')));
+  });
+  return { el, getTags: () => rows.filter(r => r.pc && r.pc.checked && r.it.h).map(r => r.it.h) };
+}
 function announcePane(l, info, conf, posts, reload, files, furl) {
   const ml = mkAnnLive(l, info);
   const pm = new Map(posts.map(p => [p.dest, p]));
@@ -1080,7 +1134,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
-  const sendIg = async (c, p, bodyEl, tagsEl, format) => {
+  const sendIg = async (c, p, bodyEl, tagsEl, format, getTags) => {
     if (block) { toast(block, 'err'); return; }
     const isStory = format === 'story';
     const fl = isStory
@@ -1089,14 +1143,15 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     if (!fl) { toast(isStory ? '先に「ストーリー下地を作る」でストーリー画像を作ってください' : '先に正方形(またはフライヤー)の画像を用意してください', 'err'); return; }
     if (fl.mime !== 'image/jpeg') { toast('Instagramに送れるのはJPEG画像だけです。この画像はJPEGではありません', 'err'); return; }
     const caption = R.composeText('instagram', { ...c, body: bodyEl.value, hashtags: tagsEl ? tagsEl.value : c.hashtags });
-    if (!(await confirmBox(isStory ? 'Instagramのストーリーに投稿しますか？' : 'Instagramのフィードに投稿しますか？', 'すぐに公開されます(取り消しはInstagramで行います)。\n画像: ' + (fl.name || (fl.kind === 'story' ? 'ストーリー' : fl.kind === 'square' ? '正方形' : 'フライヤー')) + (isStory ? '\n(ストーリーには文章は付きません)' : '\n\n' + caption.slice(0, 200) + (caption.length > 200 ? '…' : '')), '投稿する'))) return;
+    const utags = isStory || !getTags ? [] : getTags();
+    if (!(await confirmBox(isStory ? 'Instagramのストーリーに投稿しますか？' : 'Instagramのフィードに投稿しますか？', 'すぐに公開されます(取り消しはInstagramで行います)。\n画像: ' + (fl.name || (fl.kind === 'story' ? 'ストーリー' : fl.kind === 'square' ? '正方形' : 'フライヤー')) + (isStory ? '\n(ストーリーには文章は付きません)' : (utags.length ? '\n写真タグ: ' + utags.map(x => '@' + x).join(' ') : '') + '\n\n' + caption.slice(0, 200) + (caption.length > 200 ? '…' : '')), '投稿する'))) return;
     try {
       const bl = await (await fetch(furl.get(fl.id))).blob();
       const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
       const hx = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await bl.arrayBuffer()))).slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join('');
       const m = await api.wpPublish({ mediaOnly: true, image: { name: 'ig-' + hx + '.jpg', mime: 'image/jpeg', b64 } });
       if (!m || !m.url) throw new Error('画像を公式サイトのメディアに置けませんでした');
-      const j = await api.igpost({ action: 'post', format: isStory ? 'story' : 'feed', imageUrl: m.url, caption });
+      const j = await api.igpost({ action: 'post', format: isStory ? 'story' : 'feed', imageUrl: m.url, caption, userTags: utags });
       const hist = [...(p?.history || []), { at: new Date().toISOString(), status: 'success', url: j.url, id: j.id || '', by: state.by || null }].slice(-30);
       await api.saveLivePost(l.id, 'instagram', { status: 'success', history: hist }, state.by);
       toast(j.message, 'ok'); reload();
@@ -1109,13 +1164,14 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     const full = R.composeText(k, c);
     const body = h('textarea', { rows: 9, class: 'area', autocomplete: 'off', readonly: sns ? null : true }); body.value = sns ? (c.body || '') : full;
     const tags = sns ? h('input', { type: 'text', autocomplete: 'off', value: c.hashtags || '' }) : null;
+    const tp = k === 'instagram' || k === 'x' ? tagPanel(k, ml, body) : null;
     if (sns) body.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
     if (tags) tags.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
     const sel = h('select', { class: 'sel', onchange: e => save(k, { status: e.target.value, history: [...(p?.history || []), { at: new Date().toISOString(), status: e.target.value, by: state.by || null }].slice(-30) }) }, ANN_STATUS.map(s => h('option', { value: s, selected: s === st ? true : null }, R.STATUS[s].label)));
     return h('details', { class: 'card ann' },
       h('summary', {}, h('b', {}, def.name), ' ', h('i', { class: 'tag ' + (st === 'manualDone' ? 'ok' : st === 'skipped' ? 'dead' : 'mid') }, R.STATUS[st].label), p?.edited ? h('i', { class: 'tag' }, '編集済み') : null),
       k === 'youtube' || k === 'wordpress' || k === 'googleForm' ? h('div', { class: 'lsub' }, 'タイトル: ' + (c.title || '')) : null,
-      body, tags ? field('ハッシュタグ', tags) : null,
+      body, tags ? field('ハッシュタグ', tags) : null, tp ? tp.el : null,
       h('div', { class: 'lsub' }, chk.counters.map(x => `${x.label} ${x.value}/${x.max}`).join(' ・ ')),
       ...chk.issues.map(i => h('div', { class: 'lsub', style: i.level === 'error' ? 'color:#c0392b' : '' }, (i.level === 'error' ? '⚠️ ' : 'ℹ️ ') + i.msg)),
       h('div', { class: 'row', style: 'margin-top:8px;gap:8px;flex-wrap:wrap' },
@@ -1128,7 +1184,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.gforms({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
-        k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'feed') }, '📷 フィードに投稿') : null,
+        k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'feed', tp && tp.getTags) }, '📷 フィードに投稿') : null,
         k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'story') }, '📱 ストーリーに投稿') : null,
         k === 'instagram' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.igpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Instagramと連携する') : null,
         k === 'instagram' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.igpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
