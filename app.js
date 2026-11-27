@@ -1,5 +1,5 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=57';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=58';
 import * as R from './rules.js?v=50';
 import { squareMaker, storyMaker } from './snsmk.js?v=50';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-57'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-58'),
   ]);
 }
 
@@ -1130,6 +1130,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.gforms({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'feed') }, '📷 フィードに投稿') : null,
         k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'story') }, '📱 ストーリーに投稿') : null,
+        k === 'instagram' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.igpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Instagramと連携する') : null,
         k === 'instagram' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.igpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'x' && !conf ? h('button', { class: 'btn small', onclick: () => sendX(c, p, body, tags) }, '𝕏 に投稿する') : null,
         k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.xpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Xと連携する') : null,
@@ -2087,6 +2088,10 @@ async function route() {
     if (xx) { history.replaceState(null, '', location.pathname + location.hash);
       const XM = { ok: ['Xと連携できました', 'ok'], denied: ['Xでの許可がキャンセルされました', 'err'], expired: ['連携の有効時間が切れました。もう一度「Xと連携する」を押してください', 'err'], norefresh: ['Xから連携用の情報を受け取れませんでした。もう一度お試しください', 'err'] };
       const m3 = XM[xx] || ['Xとの連携でエラーが発生しました', 'err']; toast(m3[0], m3[1]); } }
+  { const sp = new URLSearchParams(location.search); const ig = sp.get('ig');
+    if (ig) { history.replaceState(null, '', location.pathname + location.hash);
+      const IM = { ok: ['Instagramと連携できました', 'ok'], denied: ['Instagramでの許可がキャンセルされました', 'err'], expired: ['連携の有効時間が切れました。もう一度「Instagramと連携する」を押してください', 'err'], norefresh: ['Instagramから連携用の情報を受け取れませんでした。もう一度お試しください', 'err'] };
+      const m4 = IM[ig] || ['Instagramとの連携でエラーが発生しました', 'err']; toast(m4[0], m4[1]); } }
   { const sp = new URLSearchParams(location.search); const gg = sp.get('google');
     if (gg) { history.replaceState(null, '', location.pathname + location.hash);
       const GM = { ok: ['Googleと連携できました', 'ok'], denied: ['Googleでの許可がキャンセルされました', 'err'], expired: ['連携の有効時間が切れました。もう一度「Googleと連携する」を押してください', 'err'], norefresh: ['Googleから連携用の情報を受け取れませんでした。もう一度お試しください', 'err'] };
