@@ -1,6 +1,6 @@
 // SNS用画像づくり(正方形・ストーリー下地)。managerの square.js / story.js を使う
 import { analyzeColors, composeSquare, toHex } from './square.js?v=50';
-import { composeStory, storyDefaults, defaultDim, colorsFromSquare, LAYOUTS, BACKGROUNDS } from './story.js?v=50';
+import { composeStory, storyDefaults, defaultDim, colorsFromSquare, LAYOUTS, BACKGROUNDS } from './story.js?v=73';
 import * as R from './rules.js?v=50';
 
 const loadImg = (src) => new Promise((ok, ng) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => ok(i); i.onerror = () => ng(new Error('画像を読み込めませんでした')); i.src = src; });
@@ -50,14 +50,14 @@ export async function storyMaker(ui, flyerUrl, squareUrl, d0, name, onSave) {
   const p = R.parseYmd(d0.ymd || '');
   const WEEK_EN = { 日: 'SUN', 月: 'MON', 火: 'TUE', 水: 'WED', 木: 'THU', 金: 'FRI', 土: 'SAT' };
   const bigDate = p ? { main: `${p.mo}.${p.d}`, sub: `${WEEK_EN[p.w] || ''}${d0.def.venue ? `  📍${d0.def.venue}` : ''}`, dateText: d0.def.date } : null;
-  let layout = 'standard', bg = squareColors ? 'patternSame' : 'blur', dim = Math.round(defaultDim(bg) * 100), soft = 0, mode = d.bottomMode;
+  let layout = 'standard', bg = squareColors ? 'patternSame' : 'blur', dim = Math.round(defaultDim(bg) * 100), soft = bg === 'blur' ? 24 : 0, mode = d.bottomMode;
   const txt = (v, rows) => { const t = h('textarea', { rows, class: 'area', autocomplete: 'off' }); t.value = v; return t; };
   const top = txt(d.top, 4), left = txt(d.left, 5), right = txt(d.right, 5), msg = txt(d.message, 2);
   const prev = h('canvas', { style: 'width:100%;max-width:300px;border-radius:12px;display:block;margin:0 auto' });
   const opts = (extra = {}) => ({ layout, bg, flyer, pattern, colors, squareColors, bigDate, dim: dim / 100, soften: soft, panels: false, top: top.value, bottomMode: mode, left: left.value, right: right.value, message: msg.value, ...extra });
   const colsBox = h('div', { class: 'grid two' }, h('label', { class: 'field' }, '左(ACT)', left), h('label', { class: 'field' }, '右(TICKET)', right));
   const msgBox = h('label', { class: 'field' }, 'ひとこと', msg);
-  const dimIn = h('input', { type: 'range', min: 0, max: 80, step: 5, value: dim }), softIn = h('input', { type: 'range', min: 0, max: 30, step: 2, value: 0 });
+  const dimIn = h('input', { type: 'range', min: 0, max: 80, step: 5, value: dim }), softIn = h('input', { type: 'range', min: 0, max: 30, step: 2, value: soft });
   const draw = () => {
     colsBox.hidden = mode !== 'columns'; msgBox.hidden = mode !== 'message';
     prev.width = 540; prev.height = 960; prev.getContext('2d').drawImage(composeStory(opts({ guides: true })), 0, 0, 540, 960);
@@ -66,7 +66,7 @@ export async function storyMaker(ui, flyerUrl, squareUrl, d0, name, onSave) {
   const drawLay = () => lay.replaceChildren(...Object.entries(LAYOUTS).filter(([k]) => k !== 'bigdate' || bigDate).map(([k, L]) =>
     h('button', { type: 'button', class: 'chip' + (k === layout ? ' on' : ''), onclick: () => { layout = k; drawLay(); draw(); } }, h('span', { class: 'chip-main' }, L.label), h('span', { class: 'chip-sub' }, L.desc))));
   const bgSel = h('select', {}); const drawBg = () => { bgSel.replaceChildren(...Object.entries(BACKGROUNDS).filter(([k]) => squareColors || !['patternSame', 'patternInvert'].includes(k)).map(([k, l]) => h('option', { value: k, selected: k === bg ? '' : null }, l))); bgSel.value = bg; };
-  bgSel.onchange = () => { bg = bgSel.value; dim = Math.round(defaultDim(bg) * 100); dimIn.value = dim; draw(); };
+  bgSel.onchange = () => { bg = bgSel.value; dim = Math.round(defaultDim(bg) * 100); dimIn.value = dim; soft = bg === 'blur' ? 24 : 0; softIn.value = soft; draw(); };
   dimIn.oninput = () => { dim = +dimIn.value; draw(); }; softIn.oninput = () => { soft = +softIn.value; draw(); };
   [top, left, right, msg].forEach(t => t.addEventListener('input', draw));
   const modeSel = h('select', {}, h('option', { value: 'columns' }, '下:ACT と TICKET'), h('option', { value: 'message' }, '下:ひとこと')); modeSel.value = mode; modeSel.onchange = () => { mode = modeSel.value; draw(); };

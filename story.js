@@ -59,6 +59,26 @@ function cover(ctx, img, scale = 1) {
   const w = img.width * s, h = img.height * s;
   ctx.drawImage(img, (STORY_W - w) / 2, (STORY_H - h) / 2, w, h);
 }
+// 端末によらず効くぼかし（縮小→拡大。ctx.filterがiPhoneで効かないため）
+function softCanvas(src, r) {
+  let w = STORY_W, cur = src;
+  const target = Math.max(6, Math.round(STORY_W / Math.max(1, r)));
+  while (w > target) {
+    w = Math.max(target, Math.round(w / 2));
+    const c = document.createElement('canvas'); c.width = w; c.height = Math.max(1, Math.round(STORY_H * w / STORY_W));
+    const x = c.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+    x.drawImage(cur, 0, 0, c.width, c.height); cur = c;
+  }
+  return cur;
+}
+function drawSoft(ctx, r) {
+  if (!(r > 0)) return;
+  const tmp = document.createElement('canvas'); tmp.width = STORY_W; tmp.height = STORY_H;
+  tmp.getContext('2d').drawImage(ctx.canvas, 0, 0);
+  const small = softCanvas(tmp, r);
+  ctx.save(); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  const m = Math.min(40, r); ctx.drawImage(small, -m, -m, STORY_W + m * 2, STORY_H + m * 2); ctx.restore();
+}
 function drawBackground(ctx, o) {
   const sq = o.squareColors || o.colors;
   const [a, b] = o.bg === 'patternSame' ? sq : o.bg === 'patternInvert' ? [sq[1], sq[0]] : (o.colors || [[20, 20, 20], [90, 90, 90]]);
@@ -77,17 +97,7 @@ function drawBackground(ctx, o) {
     }
     ctx.putImageData(id, 0, 0);
     // 柄をぼかす（0なら、くっきりのまま）
-    if (o.soften > 0) {
-      const tmp = document.createElement('canvas');
-      tmp.width = STORY_W; tmp.height = STORY_H;
-      tmp.getContext('2d').drawImage(ctx.canvas, 0, 0);
-      ctx.save();
-      ctx.filter = `blur(${o.soften}px)`;
-      // 端が透けないよう少し大きく描く
-      const m = o.soften * 3;
-      ctx.drawImage(tmp, -m, -m, STORY_W + m * 2, STORY_H + m * 2);
-      ctx.restore();
-    }
+    drawSoft(ctx, o.soften);
   } else if (o.bg === 'color') {
     const g = ctx.createLinearGradient(0, 0, STORY_W * 0.3, STORY_H);
     const dark = (c, k) => `rgb(${c.map((v) => Math.round(v * k)).join(',')})`;
@@ -97,10 +107,9 @@ function drawBackground(ctx, o) {
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, STORY_W, STORY_H);
   } else {
-    ctx.save();
-    ctx.filter = 'blur(60px) saturate(1.2) brightness(0.7)';
     cover(ctx, o.flyer, 1.25);
-    ctx.restore();
+    drawSoft(ctx, Number.isFinite(o.soften) ? o.soften * 2.5 : 60);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, STORY_W, STORY_H);
   }
   // 上下を少し暗く（文字を読みやすく）
   const g = ctx.createLinearGradient(0, 0, 0, STORY_H);
