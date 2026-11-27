@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-61'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-62'),
   ]);
 }
 
@@ -1298,7 +1298,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
   return h('section', { class: 'card' }, h('div', { class: 'cap' }, '📝 投稿先ごとの文章と進行'),
     h('p', { class: 'hint' }, '上の情報から、投稿先ごとの文章を自動で作ります。コピーして各サービスに貼り、投稿したら状態を「手動で完了」にしてください。'),
     block ? h('p', { class: 'hint', style: 'color:#c0392b' }, '⚠️ ' + block) : null, ...cards,
-    conf ? null : h('button', { class: 'btn small ghost', style: 'margin-top:10px', onclick: () => annModal(l, info, reload) }, '✏️ 告知の追加情報(特典・出店・見出しなど)'));
+    conf ? null : h('button', { class: 'btn small ghost', style: 'margin-top:10px', onclick: () => { location.hash = '#/live-form?id=' + l.id; } }, '✏️ 告知の情報を編集(特典・出店・見出しなど)'));
 }
 const liveTabs = new Map();
 const LIVE_FIELDS = {
@@ -1431,7 +1431,7 @@ async function liveView(id) {
           info.ticket_price ? h('div', { class: 'lsub' }, '🎫 ' + info.ticket_price) : null,
           info.performers ? h('div', {}, h('div', { class: 'cap sec' }, '出演者'), lines(info.performers)) : null,
           info.reserve_url ? h('a', { class: 'btn small ghost', style: 'display:inline-block;margin-top:8px', href: info.reserve_url, target: '_blank', rel: 'noopener' }, '取り置きフォームを開く') : null,
-          editBtn('告知の情報', ['official_title', 'open_time', 'start_time', 'end_time', 'ticket_price', 'performers', 'reserve_url'])),
+          conf ? null : h('button', { class: 'btn small ghost', style: 'margin-top:10px', onclick: () => { location.hash = '#/live-form?id=' + l.id; } }, '✏️ 告知の情報を編集')),
         sec('🖼 フライヤー画像', files.some(f => f.kind === 'flyer') ? null : h('p', { class: 'empty' }, 'フライヤーの画像を追加すると、公式サイトに送るときに本文と一緒に入ります。'),
           liveFileBlock(l, files, furl, 'flyer', conf, reload)),
         snsImageSec(l, info, conf, files, furl, reload),
