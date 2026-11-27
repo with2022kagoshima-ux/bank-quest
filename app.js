@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-71'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-72'),
   ]);
 }
 
@@ -951,7 +951,7 @@ async function liveFormView(id) {
       actLabel: txt(l ? a.actLabel : 'ACT', 'ACT'), shopLabel: txt(a.shopLabel, 'SHOP'),
       performers: area(info.performers, '1行に1組ずつ。「ほか」と書くと and more... になります', 5), shops: area(a.shops, '1行に1店ずつ。「FOOD:」のように最後に「:」を付けた行は小見出し', 4),
       price: txt(info.ticket_price, '例: ADV ¥3,500 / DOOR ¥4,000'), drink: txt(l ? a.drinkFee : '+1D', '例: +1D ¥600'),
-      sales: area(a.salesMethod, '例: Wiθからも購入可能。DMまたは予約ページへ', 2), reserve: txt(l ? info.reserve_url : 'https://forms.gle/hKYC9m8TMacuauNs5', 'https://forms.gle/…'), playguide: txt(a.playguideUrl, 'https://…'),
+      sales: area(a.salesMethod, '例: Wiθからも購入可能。DMまたは予約ページへ', 2), reserve: txt(info.reserve_url || 'https://forms.gle/hKYC9m8TMacuauNs5', 'https://forms.gle/…'), playguide: txt(a.playguideUrl, 'https://…'),
       bonus: txt(a.bonus, '入場特典'), notes: area(a.notes, '注意事項', 3), announce: area(a.announcement, '各SNSの文章に共通で入ります', 3),
       memo: txt(l && l.memo, '内部メモ(公開されません)'),
     };
@@ -1021,6 +1021,7 @@ async function liveFormView(id) {
       const applyBtn = h('button', { type: 'button', class: 'btn', disabled: true, onclick: () => {
         const g = got; if (!g) return;
         const put = (el, v) => { if (v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+        if (!E.reserve.value.trim()) put(E.reserve, 'https://forms.gle/hKYC9m8TMacuauNs5');
         put(E.name, g.name); put(E.date, g.date); put(E.open, g.open); put(E.start, g.start); put(E.venue, g.venue); put(E.price, g.price); put(E.drink, g.drink);
         if (g.performers.length) put(E.performers, g.performers.join('\n'));
         if (g.rest.length) { const note = g.rest.join('\n'); put(E.notes, E.notes.value.trim() ? E.notes.value.trim() + '\n' + note : note); }
