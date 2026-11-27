@@ -348,6 +348,9 @@ const real = {
     try { localStorage.setItem('bq_sns_accounts', JSON.stringify(b)); } catch { /* 保存できなくても続ける */ }
     try { await rest('settings?on_conflict=key', { method: 'POST', prefer: 'resolution=merge-duplicates,return=minimal', body: { key: 'sns_accounts', value: b } }); } catch { /* 共有の保存ができない時は端末内だけ */ }
   },
+  igSchedList: async (liveId) => (await rest('ig_scheduled?select=*&live_id=eq.' + encodeURIComponent(liveId) + '&order=run_at.asc')) || [],
+  async igSchedAdd(row) { await rest('ig_scheduled', { method: 'POST', prefer: 'return=minimal', body: row }); },
+  async igSchedDel(id) { await rest('ig_scheduled?id=eq.' + encodeURIComponent(id), { method: 'DELETE', prefer: 'return=minimal' }); },
   liveRating: async () => { const r = await rest('settings?select=value&key=eq.live_rating'); return r[0] ? r[0].value : null; },
   venues: () => rest('venues?select=id,name,prefecture&order=name'),
   async _venueId(name, pref) {
@@ -493,7 +496,7 @@ function makeDemo() {
   mkp('ロゴ 缶バッジ', '缶バッジ', [[null, null, 200, 60, 7]]);
   mkp('KEEP IT!! T', 'Tシャツ', [['S', '白', 2500, 1000, 0], ['M', '白', 2500, 1000, 1], ['L', '黒', 2500, 1000, 3]], { air_type1_role: 'color', air_type2_role: 'size' });
   mkp('STS TOUR TEE', 'Tシャツ', [['L', null, 3000, 1200, 0], ['XL', null, 3000, 1200, 3]], { co_share: 0.5, air_type1_role: 'size', air_type2_role: null });
-  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = []; const LF = []; const LP = [];
+  const RC = []; const MV = []; const ORD = new Map(); const RR = []; const TP = []; const LV = []; const AB = []; const AM = []; const AI = []; const LF = []; const LP = []; const IS = [];
 const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, aliases: 'with', notes: null, duration_sec: 215, is_active: true }, { id: 's2', title: 'ゼロ', kind: 'original', artist: null, aliases: null, notes: null, duration_sec: 190, is_active: true }, { id: 's3', title: '残響', kind: 'original', artist: null, aliases: 'zankyo', notes: null, duration_sec: 240, is_active: true }]; const SI = [];
   const allV = () => PR.flatMap(x => x.vars.map(v => ({ ...v, product: x.p })));
 
@@ -642,6 +645,9 @@ const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, alia
     async stockHistory(vid) { await wait(); return MV.filter(x => x.variant_id === vid); },
     async accountBook() { return JSON.parse(localStorage.getItem('bq_sns_accounts') || '{}'); },
     async saveAccountBook(b) { localStorage.setItem('bq_sns_accounts', JSON.stringify(b)); },
+    async igSchedList(id) { await wait(); return IS.filter(x => x.live_id === id); },
+    async igSchedAdd(r) { await wait(); IS.push({ id: 's' + IS.length, status: 'pending', ...r }); },
+    async igSchedDel(id) { await wait(); const i = IS.findIndex(x => x.id === id); if (i >= 0) IS.splice(i, 1); },
     async igpost(b) { await wait(); return { ok: true, id: '1', url: 'https://www.instagram.com/', message: b.action === 'check' ? 'Instagram「@demo」に接続できました' : 'Instagramに公開しました(デモ)' }; },
     async xpost(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, id: '1', url: 'https://x.com/', message: b.action === 'check' ? 'X「@demo」として接続できました' : 'Xに投稿しました(デモ)' }; },
     async gforms(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, message: b.action === 'check' ? 'フォーム「デモ」を読み取れました(質問 3 件)' : 'フォームに追加しました(デモ)', url: 'https://docs.google.com/forms/', id: 'x' }; },

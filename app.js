@@ -1,8 +1,8 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=59';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=70';
 import * as R from './rules.js?v=50';
 import { squareMaker, storyMaker } from './snsmk.js?v=50';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=50';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=70';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-69'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-70'),
   ]);
 }
 
@@ -1392,6 +1392,66 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
+  const igFile = (isStory) => isStory
+    ? [...(files || [])].reverse().find(f => f.kind === 'story' && /^image\//.test(f.mime || ''))
+    : ([...(files || [])].reverse().find(f => f.kind === 'square' && /^image\//.test(f.mime || '')) || (files || []).find(f => f.kind === 'flyer' && /^image\//.test(f.mime || '')));
+  const igUpload = async (fl) => {
+    const bl = await (await fetch(furl.get(fl.id))).blob();
+    const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
+    const hx = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await bl.arrayBuffer()))).slice(0, 6).map(x => x.toString(16).padStart(2, '0')).join('');
+    const m = await api.wpPublish({ mediaOnly: true, image: { name: 'ig-' + hx + '.jpg', mime: 'image/jpeg', b64 } });
+    if (!m || !m.url) throw new Error('画像を公式サイトのメディアに置けませんでした');
+    return m.url;
+  };
+  const SCHED_ST = { pending: '予約中', running: '投稿中', done: '投稿済み', failed: '失敗', missed: '見送り' };
+  const schedBox = h('div', { class: 'lsub', style: 'margin-top:6px' });
+  const loadSched = async () => {
+    try {
+      const rows = await api.igSchedList(l.id);
+      const shown = rows.filter(r => r.status === 'pending' || r.status === 'running' || Date.now() - new Date(r.done_at || r.run_at).getTime() < 3 * 86400000);
+      schedBox.replaceChildren(...(shown.length ? [h('div', { class: 'cap' }, '🕒 予約投稿')] : []), ...shown.map(r => h('div', { class: 'row', style: 'gap:8px;align-items:center;flex-wrap:wrap;margin:3px 0' },
+        h('span', {}, new Date(r.run_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' ' + (r.format === 'story' ? 'ストーリー' : 'フィード')),
+        h('i', { class: 'tag ' + (r.status === 'done' ? 'ok' : r.status === 'failed' || r.status === 'missed' ? 'dead' : 'mid') }, SCHED_ST[r.status] || r.status),
+        r.status === 'pending' ? h('button', { class: 'btn small ghost', onclick: async () => { if (!(await confirmBox('この予約を取り消しますか？', '予約した投稿は公開されなくなります。', '取り消す'))) return; try { await api.igSchedDel(r.id); toast('予約を取り消しました', 'ok'); loadSched(); } catch (e) { toast(errMsg(e), 'err'); } } }, '取り消す') : null,
+        r.status === 'done' && r.post_url ? h('a', { href: r.post_url, target: '_blank', rel: 'noopener' }, '開く') : null,
+        r.result && (r.status === 'failed' || r.status === 'missed') ? h('span', { style: 'color:#c0392b' }, r.result) : null)));
+    } catch (e) { /* 予約の表が使えない時は何も出さない */ }
+  };
+  const schedIg = async (c, p, bodyEl, tagsEl, getTags) => {
+    if (block) { toast(block, 'err'); return; }
+    const caption = R.composeText('instagram', { ...c, body: bodyEl.value, hashtags: tagsEl ? tagsEl.value : c.hashtags });
+    const utags = getTags ? getTags() : [];
+    const d0 = new Date(Date.now() + 86400000); const pad = n => String(n).padStart(2, '0');
+    const fmt = h('select', { class: 'sel' }, h('option', { value: 'feed' }, 'フィード(正方形/フライヤー・文章・写真タグ)'), h('option', { value: 'story' }, 'ストーリー(画像のみ)'));
+    const when = h('input', { type: 'datetime-local', value: d0.getFullYear() + '-' + pad(d0.getMonth() + 1) + '-' + pad(d0.getDate()) + 'T19:00' });
+    const prev = h('p', { class: 'muted', style: 'max-height:40dvh;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y' });
+    const draw = () => { const st = fmt.value === 'story'; const fl = igFile(st); prev.textContent = '画像: ' + (fl ? (fl.name || (st ? 'ストーリー' : '正方形/フライヤー')) : '（まだありません）') + (st ? '\n(ストーリーには文章は付きません)' : (utags.length ? '\n写真タグ: ' + utags.map(x => '@' + x).join(' ') : '') + '\n\n' + caption); };
+    fmt.addEventListener('change', draw); draw();
+    const m = modal([
+      h('h3', {}, 'Instagramに予約投稿'),
+      h('p', { class: 'muted' }, '指定した時刻に自動で公開します（1分ごとに確認するので、数分ずれることがあります）。公開されるまで、ここから取り消せます。'),
+      field('投稿の種類', fmt), field('公開する日時', when), prev,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn ghost', onclick: () => m.close() }, 'やめる'),
+        h('button', { class: 'btn', onclick: async () => {
+          const isStory = fmt.value === 'story'; const fl = igFile(isStory);
+          const at = new Date(when.value);
+          if (!when.value || isNaN(at)) { toast('日時を入れてください', 'err'); return; }
+          if (at.getTime() < Date.now() + 2 * 60000) { toast('2分以上先の日時にしてください', 'err'); return; }
+          if (!fl) { toast(isStory ? '先に「ストーリー下地を作る」でストーリー画像を作ってください' : '先に正方形(またはフライヤー)の画像を用意してください', 'err'); return; }
+          if (fl.mime !== 'image/jpeg') { toast('Instagramに送れるのはJPEG画像だけです', 'err'); return; }
+          if (!isStory && !caption.trim()) { toast('投稿する文章が空です', 'err'); return; }
+          m.close();
+          try {
+            const url = await igUpload(fl);
+            await api.igSchedAdd({ live_id: l.id, format: isStory ? 'story' : 'feed', image_url: url, caption: isStory ? '' : caption, user_tags: isStory ? [] : utags, run_at: at.toISOString(), created_by: state.by || null });
+            toast('予約しました：' + at.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }), 'ok');
+            loadSched();
+          } catch (e) { toast(errMsg(e), 'err'); }
+        } }, '予約する')),
+    ]);
+  };
+  loadSched();
   const sendIg = async (c, p, bodyEl, tagsEl, format, getTags) => {
     if (block) { toast(block, 'err'); return; }
     const isStory = format === 'story';
@@ -1447,12 +1507,14 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.gforms({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'feed', tp && tp.getTags) }, '📷 フィードに投稿') : null,
         k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'story') }, '📱 ストーリーに投稿') : null,
+        k === 'instagram' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedIg(c, p, body, tags, tp && tp.getTags) }, '🕒 予約投稿') : null,
         k === 'instagram' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.igpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Instagramと連携する') : null,
         k === 'instagram' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.igpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'x' && !conf ? h('button', { class: 'btn small', onclick: () => sendX(c, p, body, tags) }, '𝕏 に投稿する') : null,
         k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.xpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Xと連携する') : null,
         k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.xpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
+      k === 'instagram' ? schedBox : null,
       (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x' || k === 'instagram') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
     det.addEventListener('toggle', () => { if (det.open) ANN_OPEN.add(dk); else ANN_OPEN.delete(dk); });
