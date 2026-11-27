@@ -391,7 +391,10 @@ export function bandsintownRow(live) {
 export function bandsintownCsv(live) {
   const row = bandsintownRow(live);
   const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  return '\ufeff' + BIT_HEADERS.map(q).join(',') + '\r\n' + BIT_HEADERS.map((k) => q(row[k])).join(',') + '\r\n';
+  // ライブ配信用・2つ目のチケット用の列は、空のままだと「無効なURL」と言われることがあるので、空なら列ごと外す
+  const OPT = ['End Date', 'End Time', 'Streaming Link', 'Ticket Link 2', 'Ticket Type 2'];
+  const cols = BIT_HEADERS.filter((k) => !OPT.includes(k) || String(row[k] || '').trim());
+  return '\ufeff' + cols.map(q).join(',') + '\r\n' + cols.map((k) => q(row[k])).join(',') + '\r\n';
 }
 
 // ------------------------------------------------------------
