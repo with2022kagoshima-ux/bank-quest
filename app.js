@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-62'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-63'),
   ]);
 }
 
@@ -1121,17 +1121,133 @@ function snsImageSec(l, info, conf, files, furl, reload) {
     files.some(f => f.kind === 'story') ? h('div', {}, h('div', { class: 'cap sec' }, 'ストーリー'), liveFileBlock(l, files, furl, 'story', true, reload)) : null);
 }
 
+const TS = (() => {
+  const HANDLE_RE = /^[A-Za-z0-9._]{1,30}$/;
+function normName(s) {
+  return String(s || '').normalize('NFKC').toLowerCase()
+    .replace(/^[・･\-*\s◆◇●○■□★☆▶▷►♦◉※]+/, '')
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/[^\p{L}\p{N}]/gu, '');
+}
+/** 名前の表示用（先頭の「・」や（地域）を外す） */
+function displayName(s) {
+  return String(s || '').normalize('NFKC').replace(/^[・･\-*\s◆◇●○■□★☆▶▷►♦◉※]+/, '').replace(/\s*[（(][^）)]*[）)]\s*/g, ' ').trim();
+}
+const cleanHandle = (h) => {
+  const v = String(h || '').trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?(instagram\.com|x\.com|twitter\.com)\//i, '').replace(/[/?#].*$/, '');
+  return HANDLE_RE.test(v) ? v : '';
+};
+
+// ---- 名前とアカウントの一致度（候補の並べ替え・絞り込み用） ----
+const KANA = { きゃ:'kya',きゅ:'kyu',きょ:'kyo',しゃ:'sha',しゅ:'shu',しょ:'sho',ちゃ:'cha',ちゅ:'chu',ちょ:'cho',にゃ:'nya',にゅ:'nyu',にょ:'nyo',ひゃ:'hya',ひゅ:'hyu',ひょ:'hyo',みゃ:'mya',みゅ:'myu',みょ:'myo',りゃ:'rya',りゅ:'ryu',りょ:'ryo',ぎゃ:'gya',ぎゅ:'gyu',ぎょ:'gyo',じゃ:'ja',じゅ:'ju',じょ:'jo',びゃ:'bya',びゅ:'byu',びょ:'byo',ぴゃ:'pya',ぴゅ:'pyu',ぴょ:'pyo',てぃ:'ti',でぃ:'di',ふぁ:'fa',ふぃ:'fi',ふぇ:'fe',ふぉ:'fo',うぃ:'wi',うぇ:'we',うぉ:'wo',ゔぁ:'va',ゔぃ:'vi',ゔ:'vu',しぇ:'she',じぇ:'je',ちぇ:'che',
+  あ:'a',い:'i',う:'u',え:'e',お:'o',か:'ka',き:'ki',く:'ku',け:'ke',こ:'ko',さ:'sa',し:'shi',す:'su',せ:'se',そ:'so',た:'ta',ち:'chi',つ:'tsu',て:'te',と:'to',な:'na',に:'ni',ぬ:'nu',ね:'ne',の:'no',は:'ha',ひ:'hi',ふ:'fu',へ:'he',ほ:'ho',ま:'ma',み:'mi',む:'mu',め:'me',も:'mo',や:'ya',ゆ:'yu',よ:'yo',ら:'ra',り:'ri',る:'ru',れ:'re',ろ:'ro',わ:'wa',を:'o',ん:'n',が:'ga',ぎ:'gi',ぐ:'gu',げ:'ge',ご:'go',ざ:'za',じ:'ji',ず:'zu',ぜ:'ze',ぞ:'zo',だ:'da',ぢ:'ji',づ:'zu',で:'de',ど:'do',ば:'ba',び:'bi',ぶ:'bu',べ:'be',ぼ:'bo',ぱ:'pa',ぴ:'pi',ぷ:'pu',ぺ:'pe',ぽ:'po',ぁ:'a',ぃ:'i',ぅ:'u',ぇ:'e',ぉ:'o',ゃ:'ya',ゅ:'yu',ょ:'yo' };
+/** かな → ローマ字（ざっくり。「ザ ○○」は the ○○ とみなす） */
+function kanaToRomaji(s) {
+  let t = String(s || '').normalize('NFKC').replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  t = t.replace(/^ざ[\s　]+/, 'the ');
+  let out = '';
+  for (let i = 0; i < t.length; i++) {
+    const two = t.slice(i, i + 2);
+    if (t[i] === 'っ') { const nx = KANA[t.slice(i + 1, i + 3)] || KANA[t[i + 1]] || ''; out += nx[0] || ''; continue; }
+    if (t[i] === 'ー') { out += out.slice(-1); continue; }
+    if (KANA[two]) { out += KANA[two]; i++; continue; }
+    out += KANA[t[i]] ?? t[i];
+  }
+  return out;
+}
+const latin = (s) => String(s || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]/g, '');
+// アカウント名によく付く飾り（official・band・jp など）を外した芯
+const AFFIX = /^(the|official|band|music|team)|(official|offical|band|music|jp|japan|staff|info|insta|ig|tokyo|osaka|net|com|tw|x|ofc|of|0+|1+)$/;
+function coreHandle(u) {
+  let c = latin(u);
+  for (let k = 0; k < 4; k++) { const n = c.replace(AFFIX, ''); if (n === c || n.length < 2) break; c = n; }
+  return c;
+}
+const skeleton = (s) => s.replace(/[aeiou]/g, '').replace(/(.)\1+/g, '$1');
+function dice(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const bg = (s) => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; };
+  const A = bg(a), B = bg(b);
+  let hit = 0;
+  for (const [g, n] of A) hit += Math.min(n, B.get(g) || 0);
+  return (2 * hit) / Math.max(1, a.length - 1 + b.length - 1);
+}
+/** 名前（例：◆BLAGGED（Manchester,UK）／ザ ニンクス）とアカウント（名前・表示名）の一致度 0〜100 */
+function matchScore(name, username, display = '') {
+  const key = normName(name);
+  if (!key) return 0;
+  const keyLat = latin(displayName(name)) || '';
+  const keyRoma = latin(kanaToRomaji(displayName(name)));
+  const keys = [...new Set([key, keyLat, keyRoma].filter((k) => k && k.length >= 2))];
+  const u = latin(username), uc = coreHandle(username), dn = normName(display);
+  let best = 0;
+  for (const k of keys) {
+    const kc = coreHandle(k) || k;
+    // 表示名が同じでも、アカウント名が全然違うなら同名の別人のことが多い（例：MERRY と @ac_merry_ は別のお店）→ 80 止まり
+    if (dn && dn === k) best = Math.max(best, uc && (uc.includes(kc) || kc.includes(uc)) && Math.min(uc.length, kc.length) / Math.max(uc.length, kc.length) >= 0.8 ? 100 : 80);
+    if (u === k || uc === kc) best = Math.max(best, 98);
+    else if (uc.length >= 3 && kc.length >= 3 && (uc.includes(kc) || kc.includes(uc))) best = Math.max(best, 70 + 25 * Math.min(uc.length, kc.length) / Math.max(uc.length, kc.length));
+    if (dn && dn !== k && dn.length >= 2 && (dn.includes(k) || (k.length >= 3 && k.includes(dn)))) best = Math.max(best, 65 + 15 * Math.min(dn.length, k.length) / Math.max(dn.length, k.length));
+    best = Math.max(best, 85 * dice(kc, uc), dn ? 85 * dice(k, dn) : 0);
+    // かな名とローマ字のアカウント：子音の並びが同じなら近い（ニンクス nnks ⇔ the_ninks nnks）
+    if (k === keyRoma && k !== keyLat && skeleton(kc).length >= 3 && skeleton(kc) === skeleton(uc)) best = Math.max(best, 90);
+  }
+  return Math.round(best);
+}
+
+function guessHandles(name) {
+  const words = displayName(name).normalize('NFKC').toLowerCase().split(/[\s　]+/).map((w) => w.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+  // （英字の名前だけ。かなの名前は表記ゆれが大きいので、検索の結果と一致度で探す）
+  if (!words.length || words.join('').length < 3) return [];
+  const j = words.join(''), u = words.join('_'), d = words.join('.');
+  return [...new Set([j, u, d, `${j}_official`, `${j}official`, `${j}_band`, `${j}band`, `${j}.official`, `${u}_official`, `${j}_jp`, `${j}jp`, `${j}_japan`, `${j}music`, `${j}_music`, `the${j}`, `the_${j}`, `${j}_info`, `${j}_staff`])].filter((h) => HANDLE_RE.test(h) && h.length <= 30);
+}
+
+  return { matchScore, guessHandles, displayName };
+})();
+
 // ---- タグ付け・メンション(Instagram・X)：名前→@アカウントを覚えて、本文に@・写真タグを付ける
+// 「候補を探す」(Instagram)：過去の投稿の@・名前から考えたアカウントをInstagramで確認し、名前との一致度で並べる
 const normName = (s) => String(s || '').normalize('NFKC').toLowerCase().replace(/[（(][^）)]*[）)]/g, '').replace(/[^\p{L}\p{N}]/gu, '');
 let bookP = null;
 const getBook = () => (bookP = bookP || api.accountBook().catch(() => ({})));
 const reEsc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const fmtFol = (n) => n == null ? '' : n >= 10000 ? (n / 10000).toFixed(1).replace(/\.0$/, '') + '万' : String(n);
+const SRC_BASE = { 登録済み: 1000, 会場欄: 500, 過去の投稿: 40, 名前から: 30, Web検索: 0 };
+function suggestFor(t, targets, d, saved) {
+  const prof = d.profiles || {}; const raw = [];
+  const push = (u, source, extra = {}) => {
+    if (!u) return; const p = prof[u.toLowerCase()];
+    if (p && p.exists === false) return;
+    const dup = raw.find(c => c.username.toLowerCase() === u.toLowerCase());
+    if (dup) { if ((SRC_BASE[source] || 0) > (SRC_BASE[dup.source] || 0)) dup.source = source; dup.web = Math.max(dup.web || 0, extra.web || 0); return; }
+    raw.push({ username: (p && p.username) || u, name: (p && p.name) || extra.name || '', pic: (p && p.pic) || '', followers: p && p.followers != null ? p.followers : null, exists: p ? p.exists : null, source, web: extra.web || 0 });
+  };
+  if (saved) push(saved, '登録済み');
+  if (t.venueHandle) push(t.venueHandle, '会場欄');
+  for (const c of (d.web && d.web[t.name]) || []) push(c.username, 'Web検索', { name: c.name, web: Math.min(c.pts, 40) });
+  for (const u of d.harvested || []) { const p = prof[u] || { exists: null, username: u, name: '' }; if (p.exists === false) continue; if (TS.matchScore(t.name, p.username || u, p.name) >= 70) push(p.username || u, '過去の投稿'); }
+  for (const g of t.guesses || []) if (prof[g] && prof[g].exists) push(prof[g].username, '名前から');
+  const otherBetter = (username, display, sim) => targets.some(o => o !== t && TS.matchScore(o.name, username, display) >= 85 && TS.matchScore(o.name, username, display) > sim);
+  const out = [];
+  for (const c of raw) {
+    const sim = TS.matchScore(t.name, c.username, c.name);
+    if (!(['登録済み', '会場欄'].includes(c.source) || (sim >= 45 && !otherBetter(c.username, c.name, sim)))) continue;
+    out.push({ ...c, sim, score: (SRC_BASE[c.source] || 0) + sim * 3 + (c.web || 0) + (c.exists === true ? 20 : 0) + (c.followers ? Math.min(20, Math.log10(c.followers + 1) * 5) : 0) });
+  }
+  out.sort((a, b) => b.score - a.score);
+  const cands = out.slice(0, 6);
+  const byHandle = c => TS.matchScore(t.name, c.username, '') >= 95;
+  const auto = !saved && !t.venueHandle && cands[0] && byHandle(cands[0]) && cands[0].exists === true && !cands.slice(1).some(byHandle) ? cands[0].username : '';
+  return { cands, auto };
+}
 function tagPanel(k, ml, bodyEl) {
   const isIg = k === 'instagram';
   const key = isIg ? 'ig' : 'x';
   const names = R.performersOf(ml).filter(n => !/and\s*more/i.test(n));
   const vn = R.venuePlainName(ml);
-  const items = [...names.map(n => ({ name: n, h: '' })), ...(vn ? [{ name: vn, h: R.venueHandle(ml) || '', venue: true }] : [])];
+  const items = [...names.map(n => ({ name: n, h: '', kind: 'act' })), ...(vn ? [{ name: vn, h: R.venueHandle(ml) || '', venue: true, kind: 'venue' }] : [])];
   const el = h('div', { class: 'tagpanel', style: 'margin:8px 0' }, h('div', { class: 'lsub' }, '👥 タグ付け・メンション(読み込み中…)'));
   const rows = [];
   const hasM = (hd) => !!hd && new RegExp('@' + reEsc(hd) + '(?![A-Za-z0-9._])', 'i').test(bodyEl.value);
@@ -1145,6 +1261,21 @@ function tagPanel(k, ml, bodyEl) {
     bodyEl.value = lines.join('\n'); fire();
   };
   const delM = (hd) => { if (!hd) return; bodyEl.value = bodyEl.value.replace(new RegExp('[ \\t]?@' + reEsc(hd) + '(?![A-Za-z0-9._])', 'gi'), ''); fire(); };
+  const setHandle = async (r, nh) => {
+    const it = r.it;
+    nh = String(nh || '').trim().replace(/^@/, '').replace(/[^A-Za-z0-9._]/g, '');
+    if (it.h && hasM(it.h)) { delM(it.h); if (nh) addM(it, nh); }
+    it.h = nh; r.inp.value = nh ? '@' + nh : ''; r.mc.checked = hasM(nh);
+    const b = await getBook(); const kk = normName(it.name); b[kk] = { ...(b[kk] || {}), name: it.name, [key]: nh };
+    if (!nh && !b[kk].ig && !b[kk].x) delete b[kk];
+    api.saveAccountBook(b);
+  };
+  const checkOn = (r) => { if (!r.it.h) return; r.mc.checked = true; addM(r.it, r.it.h); if (r.pc) r.pc.checked = true; };
+  const drawCands = (r, cands) => {
+    r.cbox.replaceChildren(...cands.map(c => h('button', { type: 'button', class: 'btn small ghost', style: 'display:flex;gap:6px;align-items:center;text-align:left;margin:2px 4px 2px 0', onclick: async () => { await setHandle(r, c.username); checkOn(r); drawCands(r, cands); } },
+      c.pic ? h('img', { src: c.pic, alt: '', referrerpolicy: 'no-referrer', style: 'width:28px;height:28px;border-radius:50%;object-fit:cover' }) : h('span', {}, '@'),
+      h('span', {}, h('b', {}, (r.it.h && c.username.toLowerCase() === r.it.h.toLowerCase() ? '✔ ' : '') + '@' + c.username), h('br'), h('span', { class: 'lsub' }, [c.name, c.followers != null ? fmtFol(c.followers) + '人' : '', c.source].filter(Boolean).join(' · '))))));
+  };
   getBook().then(book => {
     el.replaceChildren(h('div', { class: 'lsub' }, '👥 タグ付け・メンション：名前のとなりに@アカウントを入れると覚えます。' + (isIg ? '「写真にタグ」は正方形・フライヤー投稿のときだけ付きます。' : '')));
     for (const it of items) {
@@ -1153,23 +1284,37 @@ function tagPanel(k, ml, bodyEl) {
       const inp = h('input', { type: 'text', autocomplete: 'off', placeholder: '@アカウント名', value: it.h ? '@' + it.h : '', style: 'flex:1;min-width:120px' });
       const mc = h('input', { type: 'checkbox' }); mc.checked = hasM(it.h);
       const pc = isIg ? h('input', { type: 'checkbox' }) : null; if (pc) pc.checked = false;
-      const row = { it, inp, mc, pc };
+      const cbox = h('div', { style: 'margin:0 0 6px' });
+      const row = { it, inp, mc, pc, cbox };
       rows.push(row);
-      inp.addEventListener('change', async () => {
-        const nh = inp.value.trim().replace(/^@/, '').replace(/[^A-Za-z0-9._]/g, '');
-        if (it.h && hasM(it.h)) { delM(it.h); if (nh) addM(it, nh); }
-        it.h = nh; inp.value = nh ? '@' + nh : ''; mc.checked = hasM(nh);
-        const b = await getBook(); const kk = normName(it.name); b[kk] = { ...(b[kk] || {}), name: it.name, [key]: nh };
-        if (!nh && !b[kk].ig && !b[kk].x) delete b[kk];
-        api.saveAccountBook(b);
-      });
+      inp.addEventListener('change', () => setHandle(row, inp.value));
       mc.addEventListener('change', () => { if (!it.h) { mc.checked = false; toast('先に@アカウントを入れてください', 'err'); return; } mc.checked ? addM(it, it.h) : delM(it.h); });
       if (pc) pc.addEventListener('change', () => { if (!it.h) { pc.checked = false; toast('先に@アカウントを入れてください', 'err'); } });
       el.append(h('div', { class: 'row', style: 'gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0' },
         h('span', { style: 'min-width:90px' }, it.name), inp,
-        h('label', { class: 'lsub' }, mc, ' 本文に@'), pc ? h('label', { class: 'lsub' }, pc, ' 写真にタグ') : null));
+        h('label', { class: 'lsub' }, mc, ' 本文に@'), pc ? h('label', { class: 'lsub' }, pc, ' 写真にタグ') : null), cbox);
     }
-    el.append(h('div', { class: 'row', style: 'gap:8px;margin-top:4px' }, h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const r of rows) if (r.it.h) { r.mc.checked = true; addM(r.it, r.it.h); if (r.pc) r.pc.checked = true; } } }, 'アカウントがある人を全部チェック'),
+    const find = h('button', { type: 'button', class: 'btn small', onclick: async () => {
+      find.disabled = true; const old = find.textContent; find.textContent = '探しています…(少しかかります)';
+      try {
+        const targets = rows.map(r => ({ name: r.it.name, kind: r.it.kind, raw: r.it.name, venueHandle: r.it.venue ? (R.venueHandle(ml) || '') : '', guesses: TS.guessHandles(r.it.name) }));
+        const need = targets.filter((t, i) => !rows[i].it.h);
+        const d = await api.igpost({ action: 'discover', targets: need.map(t => ({ name: t.name, kind: t.kind, raw: t.raw, guesses: t.guesses })) });
+        const picked = [];
+        for (const [i, r] of rows.entries()) {
+          const t = targets[i];
+          const { cands, auto } = suggestFor(t, targets, d, r.it.h);
+          drawCands(r, cands);
+          if (auto && !r.it.h) { await setHandle(r, auto); checkOn(r); drawCands(r, cands); picked.push('@' + auto); }
+        }
+        if (picked.length) toast('名前が一致したので自動で選びました：' + picked.join(' ') + '(違っていたら直してください)', 'ok');
+        else toast('候補を探しました。当てはまるものをタップして選んでください', 'ok');
+        for (const w of d.warn || []) toast(w, 'err');
+        if (!d.webReady) { /* Web検索のキーが未設定でも、Instagramの情報から探せる */ }
+      } catch (e) { toast(errMsg(e), 'err'); }
+      find.disabled = false; find.textContent = old;
+    } }, '🔎 候補を探す');
+    el.append(h('div', { class: 'row', style: 'gap:8px;margin-top:4px;flex-wrap:wrap' }, isIg ? find : null, h('button', { type: 'button', class: 'btn small ghost', onclick: () => { for (const r of rows) checkOn(r); } }, 'アカウントがある人を全部チェック'),
       h('a', { class: 'btn small ghost', href: (isIg ? 'https://www.google.com/search?q=' : 'https://x.com/search?f=user&q=') + encodeURIComponent((names[0] || '') + (isIg ? ' instagram' : '')), target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '名前で探す ↗')));
   });
   return { el, getTags: () => rows.filter(r => r.pc && r.pc.checked && r.it.h).map(r => r.it.h) };
