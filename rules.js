@@ -390,8 +390,10 @@ export function bandsintownRow(live) {
 }
 export function bandsintownCsv(live) {
   const row = bandsintownRow(live);
+  // 公式テンプレートの見出し（順序もこの通り）→ 内部の項目名
+  const COLS = [['Artist Name', ''], ['Venue*', 'Venue'], ['Country*', 'Country'], ['Address', 'Address'], ['City*', 'City'], ['Region*', 'Region'], ['Postal Code', 'Postal Code'], ['Timezone*', 'Timezone'], ['Start Date* (yyyy-mm-dd)', 'Start Date'], ['Start Time* (HH:MM)', 'Start Time'], ['End Date', 'End Date'], ['End Time', 'End Time'], ['Streaming Link', 'Streaming Link'], ['Ticket Link', 'Ticket Link'], ['Ticket Type', 'Ticket Type'], ['Ticket Link 2', 'Ticket Link 2'], ['Ticket Type 2', 'Ticket Type 2'], ['On-Sale Date', 'On-Sale Date'], ['On-Sale Time', 'On-Sale Time'], ['Lineup', 'Lineup'], ['Event Name', 'Event Name'], ['Event Display Format', ''], ['Description', 'Description'], ['Schedule Date', ''], ['Schedule Time', ''], ['Do Not Announce', ''], ['Setlist', ''], ['Event Image', '']];
   const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
-  return '\ufeff' + BIT_HEADERS.map(q).join(',') + '\r\n' + BIT_HEADERS.map((k) => q(row[k])).join(',') + '\r\n';
+  return COLS.map((c) => q(c[0])).join(',') + '\r\n' + COLS.map((c) => q(c[1] ? row[c[1]] : '')).join(',') + '\r\n';
 }
 
 // ------------------------------------------------------------
