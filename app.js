@@ -51,7 +51,7 @@ function modal(content) {
 function confirmBox(title, body, okLabel) {
   return new Promise(res => {
     const m = modal([
-      h('h3', {}, title), h('p', { class: 'muted' }, body),
+      h('h3', {}, title), h('p', { class: 'muted', style: 'max-height:55dvh;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y' }, body),
       h('div', { class: 'row' },
         h('button', { class: 'btn ghost', onclick: () => { m.close(); res(false); } }, 'やめる'),
         h('button', { class: 'btn danger', onclick: () => { m.close(); res(true); } }, okLabel)),
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-67'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-68'),
   ]);
 }
 
@@ -1375,7 +1375,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     if (block) { toast(block, 'err'); return; }
     const text = R.composeText('x', { ...c, body: bodyEl.value, hashtags: tagsEl ? tagsEl.value : c.hashtags });
     const fl = [...(files || [])].reverse().find(f => f.kind === 'square' && /^image\//.test(f.mime || '')) || (files || []).find(f => f.kind === 'flyer' && /^image\//.test(f.mime || ''));
-    if (!(await confirmBox('Xに投稿しますか？', 'すぐに公開されます(取り消しはXで行います)。\n画像: ' + (fl ? (fl.name || (fl.kind === 'square' ? '正方形' : 'フライヤー')) : 'なし') + '\n\n' + text.slice(0, 200) + (text.length > 200 ? '…' : ''), '投稿する'))) return;
+    if (!(await confirmBox('Xに投稿しますか？', 'すぐに公開されます(取り消しはXで行います)。\n画像: ' + (fl ? (fl.name || (fl.kind === 'square' ? '正方形' : 'フライヤー')) : 'なし') + '\n\n' + text, '投稿する'))) return;
     try {
       let image;
       if (fl) {
@@ -1399,7 +1399,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     if (fl.mime !== 'image/jpeg') { toast('Instagramに送れるのはJPEG画像だけです。この画像はJPEGではありません', 'err'); return; }
     const caption = R.composeText('instagram', { ...c, body: bodyEl.value, hashtags: tagsEl ? tagsEl.value : c.hashtags });
     const utags = isStory || !getTags ? [] : getTags();
-    if (!(await confirmBox(isStory ? 'Instagramのストーリーに投稿しますか？' : 'Instagramのフィードに投稿しますか？', 'すぐに公開されます(取り消しはInstagramで行います)。\n画像: ' + (fl.name || (fl.kind === 'story' ? 'ストーリー' : fl.kind === 'square' ? '正方形' : 'フライヤー')) + (isStory ? '\n(ストーリーには文章は付きません)' : (utags.length ? '\n写真タグ: ' + utags.map(x => '@' + x).join(' ') : '') + '\n\n' + caption.slice(0, 200) + (caption.length > 200 ? '…' : '')), '投稿する'))) return;
+    if (!(await confirmBox(isStory ? 'Instagramのストーリーに投稿しますか？' : 'Instagramのフィードに投稿しますか？', 'すぐに公開されます(取り消しはInstagramで行います)。\n画像: ' + (fl.name || (fl.kind === 'story' ? 'ストーリー' : fl.kind === 'square' ? '正方形' : 'フライヤー')) + (isStory ? '\n(ストーリーには文章は付きません)' : (utags.length ? '\n写真タグ: ' + utags.map(x => '@' + x).join(' ') : '') + '\n\n' + caption), '投稿する'))) return;
     try {
       const bl = await (await fetch(furl.get(fl.id))).blob();
       const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(bl); });
