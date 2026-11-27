@@ -338,7 +338,10 @@ export function generateContent(live, destKey) {
     }
     case 'googleForm': {
       // 既存フォームと同じ書き方：「2026/10/10 (土) 神戸 太陽と虎」＋ 案内文
-      const title = `${formDateKey(live.date)} (${parseYmd(live.date)?.w || ''}) ${venuePlainName(live)}\n※(選択)の部分にご希望枚数をご指定ください🙇‍♂️`.trim();
+      // 地名（地域）を先頭に付ける。会場名がすでに地名で始まっているときは重ねない
+      const vp = venuePlainName(live); const rg = String(live.region || '').trim();
+      const place = rg && !vp.normalize('NFKC').includes(rg.normalize('NFKC')) ? `${rg} ${vp}` : vp;
+      const title = `${formDateKey(live.date)} (${parseYmd(live.date)?.w || ''}) ${place}\n※(選択)の部分にご希望枚数をご指定ください🙇‍♂️`.trim();
       const body = '';
       return { title, body, hashtags: '', link: '', format: 'addShow', options: '1\n2\n3\n4\n5', required: false };
     }
