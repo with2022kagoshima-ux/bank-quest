@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-70'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-71'),
   ]);
 }
 
@@ -866,6 +866,66 @@ async function liveModal(live, done) {
 }
 
 // ---- ライブ登録・編集ページ(旧マネージャーの「ライブを登録」に近い、1ページ+SNS文章プレビュー)
+/** 主催者から届いたメール／LINEの告知文から、日付・会場・料金・出演者などを読み取る（AIは使わない）。 */
+function parseOrganizerMail(raw) {
+  const nf = (s) => String(s || '').normalize('NFKC');
+  const lines = String(raw || '').replace(/\r/g, '').split('\n').map(s => s.trim()).filter(Boolean);
+  const out = { name: '', date: '', open: '', start: '', end: '', venue: '', price: '', drink: '', performers: [], rest: [] };
+  const used = new Set();
+  const strip = (s) => s.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s■□◆◇●○▼▽▶▷★☆※・\-*]+/u, '').trim();
+  const val = (s) => strip(s).replace(/^(日時|日程|日にち|開催日|DATE|会場|場所|会場名|VENUE|PLACE|チケット(?:代|料金)?|チケ代|料金|TICKET|時間|TIME)\s*[:：]?\s*/i, '').trim();
+  // 日付
+  const dRe = /(20\d\d)\s*[\/.\-年]\s*(\d{1,2})\s*[\/.\-月]\s*(\d{1,2})/;
+  const dRe2 = /(?:^|[^\d])(\d{1,2})\s*[\/月]\s*(\d{1,2})\s*(?:日|\(|（|$|\s)/;
+  let di = -1;
+  lines.forEach((ln, i) => {
+    if (di >= 0) return; const t = nf(ln);
+    let m = dRe.exec(t);
+    if (m) { out.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0'); di = i; used.add(i); return; }
+    if (/^[^\w]*(?:日時|日程|DATE|🗓|📅)/iu.test(ln) || /\p{Extended_Pictographic}/u.test(ln.slice(0, 3))) {
+      m = dRe2.exec(t);
+      if (m) { const now = new Date(); let y = now.getFullYear(); const dt = new Date(y, +m[1] - 1, +m[2]); if (dt < new Date(now.getTime() - 86400000)) y++; out.date = y + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0'); di = i; used.add(i); }
+    }
+  });
+  // 会場・チケット・時間（行の頭の絵文字／ラベルで判断）
+  lines.forEach((ln, i) => {
+    if (used.has(i)) return; const t = nf(ln); const head = t.slice(0, 12);
+    if (!out.venue && (/^[^\w]*(?:📍|会場|場所|VENUE|PLACE)/iu.test(ln) || /📍/.test(ln.slice(0, 3)))) {
+      out.venue = val(ln).replace(/\s*[（(]\s*\d+\s*会場\s*[）)]\s*$/, '').trim(); { const mm = /[（(]\s*(\d+)\s*会場\s*[）)]/.exec(nf(ln)); if (mm) out.rest.push('※' + mm[1] + '会場での開催です'); } used.add(i); return;
+    }
+    if (!out.price && (/(チケ|ticket|料金|ADV|前売|当日|DOOR)/i.test(head) || /💸|🎫|💴/.test(ln.slice(0, 3)))) {
+      const body = nf(val(ln));
+      const amt = (x) => '¥' + Number(String(x).replace(/,/g, '')).toLocaleString('en-US');
+      const adv = /(?:ADV|前売り?)\s*[:：]?\s*[¥￥]?\s*([\d,]{3,6})/i.exec(body), door = /(?:DOOR|当日)\s*[:：]?\s*[¥￥]?\s*([\d,]{3,6})/i.exec(body);
+      if (adv || door) out.price = [adv ? 'ADV ' + amt(adv[1]) : '', door ? 'DOOR ' + amt(door[1]) : ''].filter(Boolean).join(' / ');
+      else { const one = /[¥￥]\s*([\d,]{3,6})|([\d,]{3,6})\s*円/.exec(body); if (one) out.price = amt(one[1] || one[2]); }
+      if (/ドリンク|1D|\+\s*1\s*drink|drink/i.test(body)) {
+        const dm = /(?:ドリンク代?|1D|drink)\s*[:：]?\s*[¥￥]?\s*([\d,]{3,5})\s*円?/i.exec(body);
+        out.drink = dm ? '+1D ' + amt(dm[1]) : '+1D';
+      }
+      used.add(i); return;
+    }
+    if (!out.open && !out.start && (/OPEN|START|開場|開演|⏱|⏰|🕐/i.test(ln.slice(0, 14)))) {
+      const tm = [...t.matchAll(/(\d{1,2})[:：](\d{2})/g)].map(m => m[1].padStart(2, '0') + ':' + m[2]);
+      if (/OPEN|開場/i.test(t) && /START|開演/i.test(t)) { out.open = tm[0] || ''; out.start = tm[1] || ''; if (!tm[1] && tm[0]) { /* 片方だけ */ } }
+      else if (tm.length >= 2) { out.open = tm[0]; out.start = tm[1]; }
+      else if (tm.length === 1) { if (/START|開演/i.test(t)) out.start = tm[0]; else out.open = tm[0]; }
+      used.add(i); return;
+    }
+  });
+  // 公演名：日付より前の、ラベルのない最初の行
+  const nameIdx = lines.findIndex((ln, i) => !used.has(i) && (di < 0 || i < di) && !/^(お世話|お疲れ|こんにちは|いつも|拝啓)/.test(ln) && !/\p{Extended_Pictographic}/u.test(ln.slice(0, 2)) && ln.length <= 60);
+  if (nameIdx >= 0) { out.name = strip(lines[nameIdx]); { const mm = /^[「『【\[](.*)[」』】\]]$/.exec(out.name); if (mm) out.name = mm[1]; } used.add(nameIdx); }
+  // 出演者：残りの行（見出し・URL・文章っぽい行を除く）
+  lines.forEach((ln, i) => {
+    if (used.has(i)) return; const t = nf(ln);
+    if (/^(出演|ACT|LINE\s*UP|LINEUP|出演者|and\s*more|ほか|他)\s*[:：]?$/i.test(t)) return;
+    if (/https?:\/\//i.test(t) || /^[※*＊]/.test(ln) || t.length > 50 || /[。！!？?]$/.test(t) || /(よろしく|お願い|ご連絡|です|ます)/.test(t)) { out.rest.push(ln); return; }
+    out.performers.push(strip(ln).replace(/\s+$/, ''));
+  });
+  return out;
+}
+
 async function liveFormView(id) {
   const my = ++renderId;
   const body = h('div', {}, loading());
@@ -947,8 +1007,30 @@ async function liveFormView(id) {
         toast(id ? '保存しました' : 'ライブを登録しました', 'ok'); location.hash = '#/live?id=' + lid;
       } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
     } }, id ? '保存する' : '登録する');
+    const mailBtn = h('button', { type: 'button', class: 'btn', onclick: () => {
+      const ta = h('textarea', { rows: 9, class: 'area', autocomplete: 'off', placeholder: '主催者から届いたメールやLINEの告知文を、そのまま貼り付けてください' });
+      const sum = h('div', { class: 'muted', style: 'max-height:36dvh;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;font-size:13px' });
+      let got = null;
+      const fieldsOf = (g) => [['公演名', g.name], ['日付', g.date], ['開場', g.open], ['開演', g.start], ['会場', g.venue], ['チケット料金', g.price], ['ドリンク代', g.drink], ['出演者', g.performers.length ? g.performers.length + '組：' + g.performers.join('、') : '']].filter(x => x[1]);
+      const readBtn = h('button', { type: 'button', class: 'btn ghost', onclick: () => {
+        got = parseOrganizerMail(ta.value);
+        const fl = fieldsOf(got);
+        sum.replaceChildren(...(fl.length ? [h('div', {}, '読み取れた内容（足りない所は、あとで直せます）：'), ...fl.map(([k, v]) => h('div', {}, '・' + k + '：' + v))] : [h('div', {}, '読み取れる内容が見つかりませんでした')]), ...(got.rest.length ? [h('div', { style: 'margin-top:6px' }, '上の項目に当てはまらなかった行（注意事項の欄に入れます。不要なら消してください）：'), ...got.rest.map(x => h('div', {}, '・' + x))] : []));
+        applyBtn.disabled = !fl.length;
+      } }, '読み取る');
+      const applyBtn = h('button', { type: 'button', class: 'btn', disabled: true, onclick: () => {
+        const g = got; if (!g) return;
+        const put = (el, v) => { if (v) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+        put(E.name, g.name); put(E.date, g.date); put(E.open, g.open); put(E.start, g.start); put(E.venue, g.venue); put(E.price, g.price); put(E.drink, g.drink);
+        if (g.performers.length) put(E.performers, g.performers.join('\n'));
+        if (g.rest.length) { const note = g.rest.join('\n'); put(E.notes, E.notes.value.trim() ? E.notes.value.trim() + '\n' + note : note); }
+        mm.close(); refresh(); toast('フォームに入れました。内容を確認してください', 'ok');
+      } }, 'フォームに入れる');
+      const mm = modal([h('h3', {}, '📩 主催者の連絡から自動入力'), h('p', { class: 'muted' }, '貼り付けた文章から、日付・会場・料金・時間・出演者を読み取ります。AIではなく文字の並びから判断するので、結果を確認してから入れてください。'), ta, readBtn, sum, h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn ghost', onclick: () => mm.close() }, 'やめる'), applyBtn)]);
+    } }, '📩 主催者のメールから自動入力');
     body.replaceChildren(
       h('p', { class: 'hint' }, '分からない項目は空欄のままで大丈夫です。保存すると、各SNS向けの文章が自動で作られます(あとから個別に直せます)。'),
+      sec('📩 かんたん入力', mailBtn),
       sec('基本情報', field('出演？主催？', chips([{ id: 'attend', label: '出演(呼ばれた)' }, { id: 'host', label: '主催(自分たちで開催)' }], st.kind, k => { st.kind = k; refresh(); })),
         field('公演名', E.name), field('正式なライブ名(任意)', E.official), field('SNSの本文の見出し(1行目)', headChips), headIn, field('日付', E.date)),
       sec('時間', two(field('開場', E.open), field('開演', E.start)), field('終演', E.end)),
