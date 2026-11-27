@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-66'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-67'),
   ]);
 }
 
@@ -1420,8 +1420,10 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     const body = h('textarea', { rows: 9, class: 'area', autocomplete: 'off', readonly: sns ? null : true }); body.value = sns ? (c.body || '') : full;
     const tags = sns ? h('input', { type: 'text', autocomplete: 'off', value: c.hashtags || '' }) : null;
     const tp = k === 'instagram' || k === 'x' ? tagPanel(k, ml, body) : null;
-    if (sns) body.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
-    if (tags) tags.addEventListener('change', () => save(k, { body: body.value, hashtags: tags.value, edited: true }));
+    // 文章を直しただけでは画面を作り直さない（タグ付けのチェックなどが途切れるため）
+    const quiet = async () => { try { await api.saveLivePost(l.id, k, { body: body.value, hashtags: tags.value, edited: true }, state.by); } catch (e) { toast(errMsg(e), 'err'); } };
+    if (sns) body.addEventListener('change', quiet);
+    if (tags) tags.addEventListener('change', quiet);
     const sel = h('select', { class: 'sel', onchange: e => save(k, { status: e.target.value, history: [...(p?.history || []), { at: new Date().toISOString(), status: e.target.value, by: state.by || null }].slice(-30) }) }, ANN_STATUS.map(s => h('option', { value: s, selected: s === st ? true : null }, R.STATUS[s].label)));
     const dk = l.id + '|' + k;
     const det = h('details', { class: 'card ann', open: ANN_OPEN.has(dk) ? true : null },
