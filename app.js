@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-60'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-61'),
   ]);
 }
 
@@ -888,10 +888,10 @@ async function liveFormView(id) {
       date: h('input', { type: 'date', value: l ? String(l.live_date).slice(0, 10) : ymd() }),
       open: txt(info.open_time, '18:00'), start: txt(info.start_time, '18:30'), end: txt(info.end_time, '22:00'),
       venue: txt(l && l.venue_name, '例: 神戸 太陽と虎(@taitora_kobe)', { list: 'lf-venues' }), pref: txt(l && l.prefecture, '例: 神戸'),
-      actLabel: txt(a.actLabel, 'ACT'), shopLabel: txt(a.shopLabel, 'SHOP'),
+      actLabel: txt(l ? a.actLabel : 'ACT', 'ACT'), shopLabel: txt(a.shopLabel, 'SHOP'),
       performers: area(info.performers, '1行に1組ずつ。「ほか」と書くと and more... になります', 5), shops: area(a.shops, '1行に1店ずつ。「FOOD:」のように最後に「:」を付けた行は小見出し', 4),
-      price: txt(info.ticket_price, '例: ADV ¥3,500 / DOOR ¥4,000'), drink: txt(a.drinkFee, '例: +1D ¥600'),
-      sales: area(a.salesMethod, '例: Wiθからも購入可能。DMまたは予約ページへ', 2), reserve: txt(info.reserve_url, 'https://forms.gle/…'), playguide: txt(a.playguideUrl, 'https://…'),
+      price: txt(info.ticket_price, '例: ADV ¥3,500 / DOOR ¥4,000'), drink: txt(l ? a.drinkFee : '+1D', '例: +1D ¥600'),
+      sales: area(a.salesMethod, '例: Wiθからも購入可能。DMまたは予約ページへ', 2), reserve: txt(l ? info.reserve_url : 'https://forms.gle/hKYC9m8TMacuauNs5', 'https://forms.gle/…'), playguide: txt(a.playguideUrl, 'https://…'),
       bonus: txt(a.bonus, '入場特典'), notes: area(a.notes, '注意事項', 3), announce: area(a.announcement, '各SNSの文章に共通で入ります', 3),
       memo: txt(l && l.memo, '内部メモ(公開されません)'),
     };
