@@ -1,8 +1,8 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=70';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=77';
 import * as R from './rules.js?v=50';
-import { squareMaker, storyMaker } from './snsmk.js?v=77';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=70';
+import { squareMaker, storyMaker } from './snsmk.js?v=78';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=77';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-77'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-78'),
   ]);
 }
 
@@ -1474,6 +1474,42 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
+  const gfBox = h('div', { class: 'lsub', style: 'margin-top:6px' });
+  const loadGfSched = async () => {
+    try {
+      const rows = await api.gfSchedList(l.id);
+      const shown = rows.filter(r => r.status === 'pending' || r.status === 'running' || Date.now() - new Date(r.done_at || r.run_at).getTime() < 3 * 86400000);
+      gfBox.replaceChildren(...(shown.length ? [h('div', { class: 'cap' }, '🕒 予約追加')] : []), ...shown.map(r => h('div', { class: 'row', style: 'gap:8px;align-items:center;flex-wrap:wrap;margin:3px 0' },
+        h('span', {}, new Date(r.run_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' にフォームへ追加'),
+        h('i', { class: 'tag ' + (r.status === 'done' ? 'ok' : r.status === 'failed' || r.status === 'missed' ? 'dead' : 'mid') }, ({ pending: '予約中', running: '実行中', done: '追加済み', failed: '失敗', missed: '見送り' })[r.status] || r.status),
+        r.status === 'pending' ? h('button', { class: 'btn small ghost', onclick: async () => { if (!(await confirmBox('この予約を取り消しますか？', '予約した追加は実行されなくなります。', '取り消す'))) return; try { await api.gfSchedDel(r.id); toast('予約を取り消しました', 'ok'); loadGfSched(); } catch (e) { toast(errMsg(e), 'err'); } } }, '取り消す') : null,
+        r.status === 'done' && r.post_url ? h('a', { href: r.post_url, target: '_blank', rel: 'noopener' }, '開く') : null,
+        r.result && (r.status === 'failed' || r.status === 'missed') ? h('span', { style: 'color:#c0392b' }, r.result) : null)));
+    } catch (e) { /* 予約の表が使えない時は何も出さない */ }
+  };
+  const schedGf = (c, p) => {
+    if (block) { toast(block, 'err'); return; }
+    const d0 = new Date(Date.now() + 86400000); const pad = n => String(n).padStart(2, '0');
+    const when = h('input', { type: 'datetime-local', value: d0.getFullYear() + '-' + pad(d0.getMonth() + 1) + '-' + pad(d0.getDate()) + 'T19:00' });
+    const m = modal([
+      h('h3', {}, 'Googleフォームに予約追加'),
+      h('p', { class: 'muted' }, '指定した日時に、チケット予約のGoogleフォームへこの公演の質問を自動で追加します（予約受付の開始に使えます。1分ごとに確認するので、数分ずれることがあります）。追加される前なら、ここから取り消せます。'),
+      field('追加する日時', when),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn ghost', onclick: () => m.close() }, 'やめる'),
+        h('button', { class: 'btn', onclick: async () => {
+          const at = new Date(when.value);
+          if (!when.value || isNaN(at)) { toast('日時を入れてください', 'err'); return; }
+          if (at.getTime() < Date.now() + 2 * 60000) { toast('2分以上先の日時にしてください', 'err'); return; }
+          try {
+            let imageUrl = '';
+            try { const im = await flyerImage(); if (im) { const mm = await api.wpPublish({ mediaOnly: true, image: im }); imageUrl = (mm && mm.url) || ''; } } catch (e) { toast('フライヤー画像を用意できなかったため、画像なしで予約します', 'err'); }
+            await api.gfSchedAdd({ live_id: l.id, run_at: at.toISOString(), created_by: state.by || null, payload: { imageUrl, title: c.title, body: c.body, options: c.options, required: !!c.required, dateKey: R.formDateKey(String(l.live_date || '').slice(0, 10)), venue: R.venuePlainName(ml) } });
+            m.close(); toast('予約しました', 'ok'); loadGfSched();
+          } catch (e) { toast(errMsg(e), 'err'); }
+        } }, '予約する'))]);
+  };
+  loadGfSched();
   const sendX = async (c, p, bodyEl, tagsEl) => {
     if (block) { toast(block, 'err'); return; }
     const text = R.composeText('x', { ...c, body: bodyEl.value, hashtags: tagsEl ? tagsEl.value : c.hashtags });
@@ -1604,6 +1640,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedWp(c, p) }, '🕒 予約公開') : null,
         k === 'wordpress' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.wpPublish({ check: true })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
+        k === 'googleForm' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedGf(c, p) }, '🕒 予約して追加') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.gforms({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'instagram' && !conf ? h('button', { class: 'btn small', onclick: () => sendIg(c, p, body, tags, 'feed', tp && tp.getTags) }, '📷 フィードに投稿') : null,
@@ -1616,6 +1653,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'x' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.xpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
       k === 'instagram' ? schedBox : null,
+      k === 'googleForm' ? gfBox : null,
       (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x' || k === 'instagram') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
     det.addEventListener('toggle', () => { if (det.open) ANN_OPEN.add(dk); else ANN_OPEN.delete(dk); });
