@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-68'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-69'),
   ]);
 }
 
@@ -1259,8 +1259,11 @@ function tagPanel(k, ml, bodyEl) {
   const addM = (it, hd) => {
     if (!hd || hasM(hd)) return;
     const lines = bodyEl.value.split('\n'); const kk = normName(it.name);
-    let i = lines.findIndex(l => normName(l) === kk);
-    if (i < 0) i = lines.findIndex((l, n) => n > 0 && kk && normName(l).includes(kk));
+    // 会場は「📍 会場名」の行に付ける（公演名に会場名が入っていても、そちらには付けない）
+    let i = it.venue ? lines.findIndex(l => /^\s*📍/.test(l) && kk && normName(l).includes(kk)) : -1;
+    if (i < 0) i = lines.findIndex(l => normName(l) === kk);
+    if (i < 0) i = lines.findIndex((l, n) => n > 0 && kk && !/^\s*📍/.test(l) === !it.venue && normName(l).includes(kk));
+    if (i < 0 && it.venue) i = lines.findIndex((l, n) => n > 0 && kk && normName(l).includes(kk));
     if (i >= 0) lines[i] = lines[i].replace(/\s+$/, '') + ' @' + hd; else lines.push('@' + hd);
     bodyEl.value = lines.join('\n'); fire();
   };
