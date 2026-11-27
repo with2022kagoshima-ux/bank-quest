@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-59'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-60'),
   ]);
 }
 
@@ -832,7 +832,7 @@ async function liveListView() {
     });
     body.replaceChildren(
       h('section', { class: 'card mini' }, h('div', { class: 'cap' }, '🎸 確定したライブ ' + conf.length + '本 の利益'), h('b', { class: tot < 0 ? 'neg' : 'pos' }, yen(tot))),
-      h('button', { class: 'btn big in', style: 'width:100%', onclick: () => liveModal(null, id => { location.hash = '#/live?id=' + id; }) }, '＋ ライブを登録'),
+      h('button', { class: 'btn big in', style: 'width:100%', onclick: () => { location.hash = '#/live-form'; } }, '＋ ライブを登録'),
       h('a', { class: 'btn ghost', style: 'display:block;text-align:center;text-decoration:none;margin-top:8px', href: '#/songs' }, '🎵 曲マスター(演奏回数・初披露)'),
       h('div', { class: 'cap sec' }, 'ライブ一覧'),
       ...(rows.length ? rows : [h('p', { class: 'empty' }, 'まだライブがありません。上のボタンから登録してください。')]),
@@ -863,6 +863,106 @@ async function liveModal(live, done) {
   const m = modal([h('h3', {}, live ? 'ライブを編集' : 'ライブを登録'),
     field('出演？主催？', chips([{ id: 'attend', label: '出演(呼ばれた)' }, { id: 'host', label: '主催(自分たちで開催)' }], f.kind, id => { f.kind = id; })),
     field('ライブ名', name), field('日付', date), field('会場', venue), dl, field('都道府県', pref), field('メモ', memo), msg, ok]);
+}
+
+// ---- ライブ登録・編集ページ(旧マネージャーの「ライブを登録」に近い、1ページ+SNS文章プレビュー)
+async function liveFormView(id) {
+  const my = ++renderId;
+  const body = h('div', {}, loading());
+  $app.replaceChildren(shell(id ? '✏️ ライブを編集' : '🎸 ライブを登録', body, id ? '#/live?id=' + id : '#/live-list'));
+  try {
+    let l = null; let info = {};
+    if (id) {
+      const [lives, inf] = await Promise.all([api.lives(), api.liveInfo(id)]);
+      l = lives.find(x => x.id === id); info = inf || {};
+      if (!l) { body.replaceChildren(h('p', { class: 'empty' }, 'ライブが見つかりません。')); return; }
+    }
+    if (my !== renderId) return;
+    const a = info.ann || {};
+    const venues = await api.venues().catch(() => []);
+    const st = { kind: l ? l.kind : 'attend', head: typeof a.snsHead === 'string' ? a.snsHead : null, dest: 'instagram' };
+    const txt = (v, ph, extra = {}) => h('input', { type: 'text', autocomplete: 'off', placeholder: ph || '', value: v || '', ...extra });
+    const area = (v, ph, rows = 4) => { const e = h('textarea', { rows, class: 'area', autocomplete: 'off', placeholder: ph || '' }); e.value = v || ''; return e; };
+    const E = {
+      name: txt(l && l.event_name, '例: 焼肉丼十番30周年記念【十勝負】'), official: txt(info.official_title, '正式なライブ名(空欄なら上の名前)'),
+      date: h('input', { type: 'date', value: l ? String(l.live_date).slice(0, 10) : ymd() }),
+      open: txt(info.open_time, '18:00'), start: txt(info.start_time, '18:30'), end: txt(info.end_time, '22:00'),
+      venue: txt(l && l.venue_name, '例: 神戸 太陽と虎(@taitora_kobe)', { list: 'lf-venues' }), pref: txt(l && l.prefecture, '例: 神戸'),
+      actLabel: txt(a.actLabel, 'ACT'), shopLabel: txt(a.shopLabel, 'SHOP'),
+      performers: area(info.performers, '1行に1組ずつ。「ほか」と書くと and more... になります', 5), shops: area(a.shops, '1行に1店ずつ。「FOOD:」のように最後に「:」を付けた行は小見出し', 4),
+      price: txt(info.ticket_price, '例: ADV ¥3,500 / DOOR ¥4,000'), drink: txt(a.drinkFee, '例: +1D ¥600'),
+      sales: area(a.salesMethod, '例: Wiθからも購入可能。DMまたは予約ページへ', 2), reserve: txt(info.reserve_url, 'https://forms.gle/…'), playguide: txt(a.playguideUrl, 'https://…'),
+      bonus: txt(a.bonus, '入場特典'), notes: area(a.notes, '注意事項', 3), announce: area(a.announcement, '各SNSの文章に共通で入ります', 3),
+      memo: txt(l && l.memo, '内部メモ(公開されません)'),
+    };
+    const dl = h('datalist', { id: 'lf-venues' }, ...venues.map(v => h('option', { value: v.name })));
+    E.venue.addEventListener('change', () => { const x = venues.find(v => v.name === E.venue.value.trim()); if (x && x.prefecture && !E.pref.value.trim()) { E.pref.value = x.prefecture; refresh(); } });
+    const pr = h('input', { type: 'checkbox' }); pr.checked = a.profileReserve !== false;
+    const flyer = h('input', { type: 'file', accept: 'image/*' });
+    const headIn = txt(st.head === null ? '' : st.head, '【LIVE INFO】(空欄で見出しなし)');
+    const headChips = h('div', { class: 'chips' });
+    const drawHead = () => headChips.replaceChildren(...[...R.HEAD_PRESETS, 'なし'].map(p => h('button', { type: 'button', class: 'chip' + ((p === 'なし' ? st.head === '' : st.head === p) ? ' on' : ''), onclick: () => { st.head = p === 'なし' ? '' : p; headIn.value = st.head; drawHead(); refresh(); } }, h('span', { class: 'chip-main' }, p))));
+    headIn.addEventListener('input', () => { st.head = headIn.value; drawHead(); refresh(); });
+    drawHead();
+    const pv = h('pre', { class: 'pre', style: 'white-space:pre-wrap;word-break:break-word;margin:6px 0' });
+    const pvInfo = h('div', { class: 'lsub' });
+    const tabs = h('div', { class: 'chips' });
+    const PV = [['instagram', 'Instagram'], ['x', 'X'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'], ['googleForm', 'フォーム'], ['bandsintown', 'Bandsintown'], ['wordpress', '公式サイト']];
+    const build = () => {
+      const nl = { id: id || '', kind: st.kind, event_name: E.name.value.trim(), live_date: E.date.value, venue_name: E.venue.value.trim(), prefecture: E.pref.value.trim() };
+      const ni = { official_title: E.official.value.trim() || null, open_time: E.open.value.trim(), start_time: E.start.value.trim(), end_time: E.end.value.trim(), ticket_price: E.price.value.trim(), performers: E.performers.value, reserve_url: E.reserve.value.trim(),
+        ann: { ...(E.drink.value.trim() ? { drinkFee: E.drink.value.trim() } : {}), ...(E.bonus.value.trim() ? { bonus: E.bonus.value.trim() } : {}), ...(E.sales.value.trim() ? { salesMethod: E.sales.value.trim() } : {}), ...(E.shops.value.trim() ? { shops: E.shops.value } : {}),
+          ...(E.notes.value.trim() ? { notes: E.notes.value.trim() } : {}), ...(E.announce.value.trim() ? { announcement: E.announce.value.trim() } : {}), ...(E.playguide.value.trim() ? { playguideUrl: E.playguide.value.trim() } : {}),
+          ...(st.head !== null ? { snsHead: st.head === '' ? ' ' : st.head } : {}), ...(E.actLabel.value.trim() ? { actLabel: E.actLabel.value.trim() } : {}), ...(E.shopLabel.value.trim() ? { shopLabel: E.shopLabel.value.trim() } : {}), ...(pr.checked ? {} : { profileReserve: false }) } };
+      return { nl, ni };
+    };
+    function refresh() {
+      const { nl, ni } = build();
+      try {
+        const ml = mkAnnLive(nl, ni); const k = st.dest;
+        const c = R.generateContent(ml, k); const chk = R.checkText(k, c);
+        pv.textContent = R.composeText(k, c);
+        pvInfo.replaceChildren(h('span', {}, chk.counters.map(x => `${x.label} ${x.value}/${x.max}`).join(' ・ ')), ...chk.issues.map(i => h('div', { style: i.level === 'error' ? 'color:#c0392b' : '' }, (i.level === 'error' ? '⚠️ ' : 'ℹ️ ') + i.msg)));
+      } catch (e) { pv.textContent = '(文章を作れませんでした)'; }
+    }
+    const drawTabs = () => tabs.replaceChildren(...PV.map(([k, n]) => h('button', { type: 'button', class: 'chip' + (st.dest === k ? ' on' : ''), onclick: () => { st.dest = k; drawTabs(); refresh(); } }, h('span', { class: 'chip-main' }, n))));
+    drawTabs();
+    for (const el of [...Object.values(E), pr]) { el.addEventListener('input', refresh); el.addEventListener('change', refresh); }
+    const sec = (title, ...els) => h('section', { class: 'card' }, h('div', { class: 'cap' }, title), ...els);
+    const two = (...els) => h('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px' }, ...els);
+    const msg = h('p', { class: 'form-err', role: 'alert' });
+    const ok = h('button', { class: 'btn big', onclick: async () => {
+      msg.textContent = '';
+      if (!E.name.value.trim()) { msg.textContent = 'ライブの名前を入れてください'; E.name.focus(); return; }
+      if (!E.date.value) { msg.textContent = '日付を入れてください'; return; }
+      if (!state.by) { await pickBy(true); if (!state.by) return; }
+      ok.disabled = true;
+      try {
+        const o = { name: E.name.value.trim(), date: E.date.value, kind: st.kind, venue: E.venue.value.trim(), prefecture: E.pref.value.trim(), memo: E.memo.value.trim(), by: state.by };
+        let lid = id; if (id) await api.saveLive(id, o); else lid = await api.addLive(o);
+        const { ni } = build();
+        const ann = { ...ni.ann }; if (ann.snsHead === ' ') ann.snsHead = ' ';
+        await api.saveLiveInfo(lid, { official_title: ni.official_title, open_time: ni.open_time || null, start_time: ni.start_time || null, end_time: ni.end_time || null, ticket_price: ni.ticket_price || null, performers: ni.performers.trim() || null, reserve_url: ni.reserve_url || null, ann: Object.keys(ann).length ? ann : null });
+        if (flyer.files && flyer.files[0]) { try { await api.addLiveFile(lid, 'flyer', flyer.files[0], state.by); } catch (e) { toast('フライヤー画像だけ保存できませんでした: ' + errMsg(e), 'err'); } }
+        toast(id ? '保存しました' : 'ライブを登録しました', 'ok'); location.hash = '#/live?id=' + lid;
+      } catch (e) { msg.textContent = errMsg(e); ok.disabled = false; }
+    } }, id ? '保存する' : '登録する');
+    body.replaceChildren(
+      h('p', { class: 'hint' }, '分からない項目は空欄のままで大丈夫です。保存すると、各SNS向けの文章が自動で作られます(あとから個別に直せます)。'),
+      sec('基本情報', field('出演？主催？', chips([{ id: 'attend', label: '出演(呼ばれた)' }, { id: 'host', label: '主催(自分たちで開催)' }], st.kind, k => { st.kind = k; refresh(); })),
+        field('公演名', E.name), field('正式なライブ名(任意)', E.official), field('SNSの本文の見出し(1行目)', headChips), headIn, field('日付', E.date)),
+      sec('時間', two(field('開場', E.open), field('開演', E.start)), field('終演', E.end)),
+      sec('会場', field('会場名', E.venue, '会場のSNSアカウントは「(@○○)」で書くと、Instagramで使えます'), dl, field('地域', E.pref)),
+      sec('出演者・出店', two(field('出演者の見出し', E.actLabel), field('出店の見出し', E.shopLabel)), field('出演者', E.performers), field('出店', E.shops)),
+      sec('チケット', two(field('チケット料金', E.price), field('ドリンク代', E.drink)), field('販売方法・予約方法', E.sales), field('予約フォームのURL', E.reserve), field('プレイガイドのURL', E.playguide)),
+      sec('特典・注意事項・告知文', field('入場特典', E.bonus), field('注意事項', E.notes), field('告知文(追加のひとこと)', E.announce)),
+      sec('メモ', field('内部メモ', E.memo)),
+      sec('素材(フライヤー画像)', field('フライヤー画像', flyer, '保存すると、画像が公演に追加されます。正方形・ストーリー画像は、保存後の画面から作れます')),
+      sec('オプション', h('label', { class: 'chk' }, pr, ' SNSの最後に「チケット予約は、プロフィールのリンク or DMから！」を入れる')),
+      sec('投稿される文章のプレビュー', h('p', { class: 'hint' }, '上の入力から自動で作った文章です。入力を変えるとすぐ変わります。保存後、公演の「告知」から個別に直せます。'), tabs, pv, pvInfo),
+      msg, h('div', { class: 'row', style: 'gap:8px;margin:12px 0 40px' }, h('a', { class: 'btn big ghost', style: 'text-decoration:none;text-align:center;flex:1', href: id ? '#/live?id=' + id : '#/live-list' }, 'キャンセル'), ok));
+    refresh();
+  } catch (e) { body.replaceChildren(errorBox(e, () => liveFormView(id))); }
 }
 
 function liveEntryModal(live, isIn, done, entry) {
@@ -1263,7 +1363,7 @@ async function liveView(id) {
       h('div', { class: 'trio' }, h('div', {}, h('small', {}, '収入'), h('b', { class: 'pos' }, yen(l.income))), h('div', {}, h('small', {}, '支出'), h('b', { class: 'neg' }, yen(l.expense))), h('div', {}, h('small', {}, '評価'), h('b', {}, ico + ' ' + lab))),
       pendSum > 0 ? h('p', { class: 'note' }, `🕓 審査中の請求 ${yen(pendSum)}（利益には入っていません。承認すると支出になります）`) : null,
       l.memo ? h('p', { class: 'hint' }, l.memo) : null,
-      conf ? null : h('button', { class: 'btn small', style: 'margin-top:10px', onclick: () => liveModal(l, reload) }, 'ライブの情報を編集'));
+      conf ? null : h('button', { class: 'btn small', style: 'margin-top:10px', onclick: () => { location.hash = '#/live-form?id=' + l.id; } }, 'ライブの情報を編集'));
     const myAb = abs.filter(b => b.live_id === id); const airSales = ast ? Number(ast.sales) : myAb.reduce((x, b) => x + (Number(b.total) || 0), 0);
     const typed = ast ? Number(ast.typed) : 0;
     const diff = airSales - typed;
@@ -2165,6 +2265,7 @@ async function route() {
   if (path === '/air') return airView();
   if (path === '/base') return baseView(q);
   if (path === '/live-list') return liveListView();
+  if (path === '/live-form') return liveFormView(q.get('id') || '');
   if (path === '/songs') return songsView();
   if (path === '/live') return liveView(q.get('id'));
   if (path === '/live-sale') return saleView('live', q.get('id'));
