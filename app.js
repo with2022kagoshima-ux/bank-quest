@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=89';
-import * as R from './rules.js?v=91';
-import { squareMaker, storyMaker } from './snsmk.js?v=91';
+import * as R from './rules.js?v=92';
+import { squareMaker, storyMaker } from './snsmk.js?v=92';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=89';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -214,7 +214,7 @@ function openMenu() {
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
     legalLinks(),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-91'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-92'),
   ]);
 }
 
@@ -1353,7 +1353,8 @@ function tagPanel(k, ml, bodyEl) {
   const key = isIg ? 'ig' : 'x';
   const names = R.performersOf(ml).filter(n => !/and\s*more/i.test(n));
   const vn = R.venuePlainName(ml);
-  const items = [...names.map(n => ({ name: n, h: '', kind: 'act' })), ...(vn ? [{ name: vn, h: R.venueHandle(ml) || '', venue: true, kind: 'venue' }] : [])];
+  const vparts = R.venueParts(ml);
+  const items = [...names.map(n => ({ name: n, h: '', kind: 'act' })), ...(vn ? vparts.map(p => ({ name: p.plain || vn, h: p.handle || '', vh: p.handle || '', venue: true, kind: 'venue' })) : [])];
   const el = h('div', { class: 'tagpanel', style: 'margin:8px 0' }, h('div', { class: 'lsub' }, '👥 タグ付け・メンション(読み込み中…)'));
   const rows = [];
   const sk = k + '|' + items.map(i => i.name).join('|');
@@ -1414,7 +1415,7 @@ function tagPanel(k, ml, bodyEl) {
     const find = h('button', { type: 'button', class: 'btn small', onclick: async () => {
       find.disabled = true; const old = find.textContent; find.textContent = '探しています…(少しかかります)';
       try {
-        const targets = rows.map(r => ({ name: r.it.name, kind: r.it.kind, raw: r.it.name, venueHandle: r.it.venue ? (R.venueHandle(ml) || '') : '', guesses: TS.guessHandles(r.it.name) }));
+        const targets = rows.map(r => ({ name: r.it.name, kind: r.it.kind, raw: r.it.name, venueHandle: r.it.venue ? (r.it.vh || '') : '', guesses: TS.guessHandles(r.it.name) }));
         const need = targets.filter((t, i) => !rows[i].it.h);
         const d = await api.igpost({ action: 'discover', targets: need.map(t => ({ name: t.name, kind: t.kind, raw: t.raw, guesses: t.guesses })) });
         st.d = d; st.targets = targets;

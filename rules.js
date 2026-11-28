@@ -223,6 +223,15 @@ export function venueHandle(live) {
   const m = /@([A-Za-z0-9._]+)/.exec(live.venue || '');
   return m ? m[1] : '';
 }
+/** 会場が2つ以上（サーキットなど）のとき、会場ごとに分ける。1つなら要素1つ */
+export function venueParts(live) {
+  const raw = String(live.venue || '');
+  const plainOf = (s) => s.replace(/[（(]\s*@[A-Za-z0-9._]+\s*[)）]/g, '').replace(/\s*@[A-Za-z0-9._]+/g, '').replace(/\s+/g, ' ').trim();
+  // 英数字どうしをつなぐ「&」（例: Rock & Roll Bar）は会場名の一部なので分けない
+  const parts = raw.replace(/([A-Za-z0-9])\s*[&＆]\s*(?=[A-Za-z0-9])/g, '$1\u0001').split(/\s*(?:[&＆／/、,]|\s[×x]\s)\s*/).map((s) => s.replace(/\u0001/g, ' & ').trim()).filter(Boolean);
+  const ok = parts.length >= 2 && parts.every((p) => plainOf(p).length >= 2);
+  return (ok ? parts : [raw.trim()]).filter(Boolean).map((p) => ({ plain: plainOf(p), handle: (/@([A-Za-z0-9._]+)/.exec(p) || [])[1] || '' }));
+}
 export function venuePlainName(live) {
   // 「（@handle）」でも「 @handle」でも、会場のSNSアカウント部分は外す
   return String(live.venue || '').replace(/[（(]\s*@[A-Za-z0-9._]+\s*[)）]/g, '').replace(/\s*@[A-Za-z0-9._]+/g, '').replace(/\s+/g, ' ').trim();
@@ -247,6 +256,8 @@ function venueCore(live) {
 }
 /** 会場名のハッシュタグ（例：#MOONSTEP、#SRHALL）。空白や記号は詰める */
 export function venueTag(live) {
+  const ps = venueParts(live);
+  if (ps.length >= 2) return ps.map((p) => { const c = venueCore({ ...live, venue: p.plain }); return c ? tagify(c) : ''; }).filter(Boolean).join(' ');
   const core = venueCore(live);
   return core ? tagify(core) : '';
 }
@@ -376,7 +387,7 @@ export function generateContent(live, destKey) {
 const BIT_CITY = { '鹿児島': 'Kagoshima', '福岡': 'Fukuoka', '北九州': 'Kitakyushu', '小倉': 'Kitakyushu', '熊本': 'Kumamoto', '長崎': 'Nagasaki', '佐賀': 'Saga', '大分': 'Oita', '宮崎': 'Miyazaki', '沖縄': 'Okinawa', '那覇': 'Naha', '広島': 'Hiroshima', '岡山': 'Okayama', '山口': 'Yamaguchi', '徳島': 'Tokushima', '高松': 'Takamatsu', '香川': 'Kagawa', '松山': 'Matsuyama', '愛媛': 'Ehime', '高知': 'Kochi', '神戸': 'Kobe', '大阪': 'Osaka', '京都': 'Kyoto', '奈良': 'Nara', '名古屋': 'Nagoya', '東京': 'Tokyo', '横浜': 'Yokohama', '仙台': 'Sendai', '札幌': 'Sapporo', '新潟': 'Niigata', '金沢': 'Kanazawa', '静岡': 'Shizuoka', '浜松': 'Hamamatsu', '三重': 'Mie', '津': 'Tsu' };
 export const BIT_HEADERS = ['Venue', 'Country', 'Address', 'City', 'Region', 'Postal Code', 'Start Date', 'End Date', 'Start Time', 'End Time', 'Streaming Link', 'Ticket Link', 'Ticket Type', 'Ticket Link 2', 'Ticket Type 2', 'On-Sale Date', 'On-Sale Time', 'Lineup', 'Event Name', 'Description', 'Scheduled date', 'Scheduled time', 'Timezone'];
 /** 会場が2つ以上（サーキットなど）で、Bandsintown用の会場が未入力か */
-export const multiVenue = (live) => !String(live.bitVenue || '').trim() && /[&＆／/、,]|\s[×x]\s/.test(venuePlainName(live));
+export const multiVenue = (live) => !String(live.bitVenue || '').trim() && venueParts(live).length >= 2;
 export function bandsintownRow(live) {
   const hm = (s) => { const m = /(\d{1,2})\s*[:：]\s*(\d{2})/.exec(String(s || '').normalize('NFKC')); return m ? String(m[1]).padStart(2, '0') + ':' + m[2] : ''; };
   const city = BIT_CITY[String(live.region || '').trim()] || String(live.region || '').trim();
