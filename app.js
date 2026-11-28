@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=89';
-import * as R from './rules.js?v=89';
-import { squareMaker, storyMaker } from './snsmk.js?v=89';
+import * as R from './rules.js?v=90';
+import { squareMaker, storyMaker } from './snsmk.js?v=90';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=89';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -214,7 +214,7 @@ function openMenu() {
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
     legalLinks(),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-89'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-90'),
   ]);
 }
 
@@ -967,6 +967,18 @@ async function liveFormView(id) {
     };
     const dl = h('datalist', { id: 'lf-venues' }, ...venues.map(v => h('option', { value: v.name })));
     E.venue.addEventListener('change', () => { const x = venues.find(v => v.name === E.venue.value.trim()); if (x && x.prefecture && !E.pref.value.trim()) { E.pref.value = x.prefecture; refresh(); } const ad = venueAddrs[E.venue.value.trim()]; if (ad && !E.address.value.trim()) { E.address.value = ad; toast('前回入れた会場の住所を入れました', 'ok'); refresh(); } });
+    const addrCand = h('div', { class: 'lsub', style: 'margin:4px 0 8px' });
+    const addrBtn = h('button', { class: 'btn small ghost', type: 'button', style: 'margin-top:6px', onclick: async () => {
+      const nm = E.venue.value.trim(); if (!nm) { toast('先に会場名を入れてください', 'err'); return; }
+      addrBtn.disabled = true; addrCand.textContent = '調べています…';
+      try {
+        const j = await api.igpost({ action: 'venueAddress', name: nm, region: E.pref.value.trim() });
+        if (!j.ok) { addrCand.textContent = ''; toast(j.message || '調べられませんでした', 'err'); }
+        else if (!j.candidates.length) addrCand.textContent = '住所の候補が見つかりませんでした。手で入れてください。';
+        else addrCand.replaceChildren('候補（タップで入ります。必ず会場の公式情報とあわせて確認してください）', ...j.candidates.map(c => h('button', { class: 'btn small ghost', type: 'button', style: 'display:block;margin-top:4px;text-align:left', onclick: () => { E.address.value = c.address.replace(/^〒\s*\d{3}-?\d{4}\s*/, ''); addrCand.textContent = ''; refresh(); } }, c.address + (c.source ? '（' + c.source + '）' : ''))));
+      } catch (e) { addrCand.textContent = ''; toast(errMsg(e), 'err'); }
+      addrBtn.disabled = false;
+    } }, '🔎 住所を調べる');
     const pr = h('input', { type: 'checkbox' }); pr.checked = a.profileReserve !== false;
     const flyer = h('input', { type: 'file', accept: 'image/*' });
     const headIn = txt(st.head === null ? '' : st.head, '【LIVE INFO】(空欄で見出しなし)');
@@ -1045,7 +1057,7 @@ async function liveFormView(id) {
       sec('基本情報', field('出演？主催？', chips([{ id: 'attend', label: '出演(呼ばれた)' }, { id: 'host', label: '主催(自分たちで開催)' }], st.kind, k => { st.kind = k; refresh(); })),
         field('公演名', E.name), field('正式なライブ名(任意)', E.official), field('SNSの本文の見出し(1行目)', headChips), headIn, field('日付', E.date)),
       sec('時間', two(field('開場', E.open), field('開演', E.start)), field('終演', E.end)),
-      sec('会場', field('会場名', E.venue, '会場のSNSアカウントは「(@○○)」で書くと、Instagramで使えます'), dl, field('地域', E.pref), field('会場の住所', E.address, 'Bandsintown用CSVの住所欄に入ります（任意）')),
+      sec('会場', field('会場名', E.venue, '会場のSNSアカウントは「(@○○)」で書くと、Instagramで使えます'), dl, field('地域', E.pref), field('会場の住所', E.address, 'Bandsintown用CSVの住所欄に入ります（任意）'), addrBtn, addrCand),
       sec('出演者・出店', two(field('出演者の見出し', E.actLabel), field('出店の見出し', E.shopLabel)), field('出演者', E.performers), field('出店', E.shops)),
       sec('チケット', two(field('チケット料金', E.price), field('ドリンク代', E.drink)), field('販売方法・予約方法', E.sales), field('予約フォームのURL', E.reserve), field('プレイガイドのURL', E.playguide)),
       sec('特典・注意事項・告知文', field('入場特典', E.bonus), field('注意事項', E.notes), field('告知文(追加のひとこと)', E.announce)),
