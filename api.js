@@ -433,6 +433,16 @@ const real = {
     if (!j.ok) throw new ApiError(j.message || 'Googleフォームでエラーが発生しました', 'api');
     return j;
   },
+  async ytpost(body) {
+    const s = await freshSession();
+    let r;
+    try { r = await fetch(`${C.url}/functions/v1/yt-post`, { method: 'POST', headers: { apikey: C.key, Authorization: `Bearer ${s.access}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
+    catch { throw new ApiError('通信できません。電波のある場所でもう一度お試しください。', 'net'); }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 404) throw new ApiError('YouTube連携の中継(Edge Function)がまだ設置されていません', 'api');
+    if (!j.ok) throw new ApiError(j.message || 'YouTubeでエラーが発生しました', 'api');
+    return j;
+  },
   async igpost(body) {
     const s = await freshSession();
     let r;
@@ -656,6 +666,7 @@ const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, alia
     async gfSchedDel(id) { await wait(); const i = GS.findIndex(x => x.id === id); if (i >= 0) GS.splice(i, 1); },
     async igpost(b) { await wait(); return { ok: true, id: '1', url: 'https://www.instagram.com/', message: b.action === 'check' ? 'Instagram「@demo」に接続できました' : 'Instagramに公開しました(デモ)' }; },
     async xpost(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, id: '1', url: 'https://x.com/', message: b.action === 'check' ? 'X「@demo」として接続できました' : 'Xに投稿しました(デモ)' }; },
+    async ytpost(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, message: 'YouTubeと連携できています(デモ)', uploadUrl: '' }; },
     async gforms(b) { await wait(); if (b.action === 'connect') return { ok: true, url: '#/home' }; return { ok: true, message: b.action === 'check' ? 'フォーム「デモ」を読み取れました(質問 3 件)' : 'フォームに追加しました(デモ)', url: 'https://docs.google.com/forms/', id: 'x' }; },
     async wpPublish(b) { await wait(); if (b.mediaOnly) return { ok: true, id: '1', url: 'https://example.com/flyer.jpg' }; if (b.probe) return { ok: true, exists: false }; return b.check ? { ok: true, message: 'WordPress「デモ」として接続できました' } : { ok: true, id: '1', status: b.publish ? 'publish' : 'draft', url: 'https://example.com/?p=1', message: b.publish ? '公式サイトに公開しました(デモ)' : '公式サイトに下書きを作成しました(デモ)' }; },
     async baseSync(action) {

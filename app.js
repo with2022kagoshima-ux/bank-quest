@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=77';
-import * as R from './rules.js?v=83';
-import { squareMaker, storyMaker } from './snsmk.js?v=83';
+import * as R from './rules.js?v=84';
+import { squareMaker, storyMaker } from './snsmk.js?v=84';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=77';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -205,7 +205,7 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-83'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-84'),
   ]);
 }
 
@@ -1474,6 +1474,37 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       toast(j.message, 'ok'); reload();
     } catch (e) { toast(errMsg(e), 'err'); }
   };
+  const ytBox = h('div', { class: 'lsub', style: 'margin-top:6px' });
+  const sendYt = async (c, bodyEl, tagsEl) => {
+    if (block) { toast(block, 'err'); return; }
+    const inp = h('input', { type: 'file', accept: 'video/*', style: 'display:none' });
+    document.body.append(inp);
+    inp.onchange = async () => {
+      const f = inp.files && inp.files[0]; inp.remove();
+      if (!f) return;
+      const title = (c.title || '').trim();
+      const desc = [bodyEl.value, tagsEl ? tagsEl.value : ''].filter(x => x && x.trim()).join('\n\n');
+      if (!(await confirmBox('YouTubeに非公開でアップロードしますか？', 'ファイル: ' + f.name + '（' + (f.size / 1048576).toFixed(1) + 'MB）\nタイトル: ' + title + '\n\n非公開で入ります。公開はYouTube Studioで行ってください。\nアップロード中はこの画面を閉じないでください。', 'アップロードする'))) return;
+      try {
+        ytBox.textContent = '準備中…';
+        const init = await api.ytpost({ action: 'init', title, description: desc, size: f.size, mime: f.type || 'video/mp4', origin: location.origin });
+        const j = await new Promise((res, rej) => {
+          const x = new XMLHttpRequest(); x.open('PUT', init.uploadUrl);
+          x.setRequestHeader('Content-Type', f.type || 'video/mp4');
+          x.upload.onprogress = e => { if (e.lengthComputable) ytBox.textContent = 'アップロード中… ' + Math.round(e.loaded / e.total * 100) + '%'; };
+          x.onload = () => { try { const r = JSON.parse(x.responseText || '{}'); if (x.status >= 200 && x.status < 300 && r.id) res(r); else rej(new Error('YouTubeのエラー: ' + ((r.error && r.error.message) || x.status))); } catch { rej(new Error('アップロードの結果を読み取れませんでした')); } };
+          x.onerror = () => rej(new Error('アップロードが途中で止まりました。電波のよい場所でもう一度お試しください'));
+          x.send(f);
+        });
+        const url = 'https://studio.youtube.com/video/' + j.id + '/edit';
+        ytBox.replaceChildren('アップロードできました（非公開）。', h('a', { href: url, target: '_blank', rel: 'noopener' }, 'YouTube Studioで開く'));
+        const hist = [...(pm.get('youtube')?.history || []), { at: new Date().toISOString(), status: 'success', url, id: j.id, by: state.by || null }].slice(-30);
+        await api.saveLivePost(l.id, 'youtube', { status: 'success', history: hist }, state.by);
+        toast('YouTubeに非公開でアップロードしました。公開はYouTube Studioで押してください', 'ok');
+      } catch (e) { ytBox.textContent = ''; toast(errMsg(e), 'err'); }
+    };
+    inp.click();
+  };
   const gfBox = h('div', { class: 'lsub', style: 'margin-top:6px' });
   const loadGfSched = async () => {
     try {
@@ -1646,6 +1677,9 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
             toast('CSVを作りました。Bandsintown for Artists の Events > Upload からアップロードしてください（下書きとして入ります）', 'ok');
           } catch (e) { toast(errMsg(e), 'err'); }
         } }, '📄 アップロード用CSV') : null,
+        k === 'youtube' && !conf ? h('button', { class: 'btn small', onclick: () => sendYt(c, body, tags) }, '🎬 動画を選んで非公開アップロード') : null,
+        k === 'youtube' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.ytpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 YouTubeと連携する') : null,
+        k === 'youtube' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.ytpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
         k === 'googleForm' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedGf(c, p) }, '🕒 予約して追加') : null,
         k === 'googleForm' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.gforms({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 Googleと連携する') : null,
@@ -1661,7 +1695,8 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         p?.edited && sns ? h('button', { class: 'btn small ghost', onclick: () => save(k, { body: null, hashtags: null, edited: false }) }, '自動の文章に戻す') : null),
       k === 'instagram' ? schedBox : null,
       k === 'googleForm' ? gfBox : null,
-      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x' || k === 'instagram') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
+      k === 'youtube' ? ytBox : null,
+      (() => { const last = [...(p?.history || [])].reverse().find(x => x.url); return last && (k === 'wordpress' || k === 'googleForm' || k === 'x' || k === 'instagram' || k === 'youtube') ? h('div', { class: 'lsub' }, '最後に送った先: ', h('a', { href: last.url, target: '_blank', rel: 'noopener' }, '開く')) : null; })(),
       h('div', { style: 'margin-top:8px' }, sel));
     det.addEventListener('toggle', () => { if (det.open) ANN_OPEN.add(dk); else ANN_OPEN.delete(dk); });
     return det;
