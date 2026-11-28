@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=77';
-import * as R from './rules.js?v=86';
-import { squareMaker, storyMaker } from './snsmk.js?v=86';
+import * as R from './rules.js?v=87';
+import { squareMaker, storyMaker } from './snsmk.js?v=87';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=77';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -214,7 +214,7 @@ function openMenu() {
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
     legalLinks(),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-86'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-87'),
   ]);
 }
 
@@ -1485,6 +1485,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
   };
   const ytBox = h('div', { class: 'lsub', style: 'margin-top:6px' });
   const ytPriv = h('select', { style: 'width:auto;display:inline-block;padding:4px 8px' }, h('option', { value: 'private' }, '非公開'), h('option', { value: 'unlisted' }, '限定公開（URLを知る人のみ）'), h('option', { value: 'public' }, '公開'));
+  ytPriv.value = 'public';
   const PRIV = { private: '非公開', unlisted: '限定公開', public: '公開' };
   const sendYt = async (c, bodyEl, tagsEl) => {
     if (block) { toast(block, 'err'); return; }
