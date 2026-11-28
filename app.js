@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=89';
-import * as R from './rules.js?v=90';
-import { squareMaker, storyMaker } from './snsmk.js?v=90';
+import * as R from './rules.js?v=91';
+import { squareMaker, storyMaker } from './snsmk.js?v=91';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=89';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -214,7 +214,7 @@ function openMenu() {
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
     legalLinks(),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-90'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-91'),
   ]);
 }
 
@@ -957,7 +957,7 @@ async function liveFormView(id) {
       name: txt(l && l.event_name, '例: 焼肉丼十番30周年記念【十勝負】'), official: txt(info.official_title, '正式なライブ名(空欄なら上の名前)'),
       date: h('input', { type: 'date', value: l ? String(l.live_date).slice(0, 10) : ymd() }),
       open: txt(info.open_time, '18:00'), start: txt(info.start_time, '18:30'), end: txt(info.end_time, '22:00'),
-      venue: txt(l && l.venue_name, '例: 神戸 太陽と虎(@taitora_kobe)', { list: 'lf-venues' }), pref: txt(l && l.prefecture, '例: 神戸'), address: txt(a.venueAddress, '例: 兵庫県神戸市中央区…'),
+      venue: txt(l && l.venue_name, '例: 神戸 太陽と虎(@taitora_kobe)', { list: 'lf-venues' }), pref: txt(l && l.prefecture, '例: 神戸'), address: txt(a.venueAddress, '例: 兵庫県神戸市中央区…'), bitVenue: txt(a.bitVenue, '空欄なら上の会場名を使います'), bitAddress: txt(a.bitAddress, '空欄なら上の住所を使います'),
       actLabel: txt(l ? a.actLabel : 'ACT', 'ACT'), shopLabel: txt(a.shopLabel, 'SHOP'),
       performers: area(info.performers, '1行に1組ずつ。「ほか」と書くと and more... になります', 5), shops: area(a.shops, '1行に1店ずつ。「FOOD:」のように最後に「:」を付けた行は小見出し', 4),
       price: txt(info.ticket_price, '例: ADV ¥3,500 / DOOR ¥4,000'), drink: txt(l ? a.drinkFee : '+1D', '例: +1D ¥600'),
@@ -993,7 +993,7 @@ async function liveFormView(id) {
     const build = () => {
       const nl = { id: id || '', kind: st.kind, event_name: E.name.value.trim(), live_date: E.date.value, venue_name: E.venue.value.trim(), prefecture: E.pref.value.trim() };
       const ni = { official_title: E.official.value.trim() || null, open_time: E.open.value.trim(), start_time: E.start.value.trim(), end_time: E.end.value.trim(), ticket_price: E.price.value.trim(), performers: E.performers.value, reserve_url: E.reserve.value.trim(),
-        ann: { ...(E.address.value.trim() ? { venueAddress: E.address.value.trim() } : {}), ...(E.drink.value.trim() ? { drinkFee: E.drink.value.trim() } : {}), ...(E.bonus.value.trim() ? { bonus: E.bonus.value.trim() } : {}), ...(E.sales.value.trim() ? { salesMethod: E.sales.value.trim() } : {}), ...(E.shops.value.trim() ? { shops: E.shops.value } : {}),
+        ann: { ...(E.address.value.trim() ? { venueAddress: E.address.value.trim() } : {}), ...(E.bitVenue.value.trim() ? { bitVenue: E.bitVenue.value.trim() } : {}), ...(E.bitAddress.value.trim() ? { bitAddress: E.bitAddress.value.trim() } : {}), ...(E.drink.value.trim() ? { drinkFee: E.drink.value.trim() } : {}), ...(E.bonus.value.trim() ? { bonus: E.bonus.value.trim() } : {}), ...(E.sales.value.trim() ? { salesMethod: E.sales.value.trim() } : {}), ...(E.shops.value.trim() ? { shops: E.shops.value } : {}),
           ...(E.notes.value.trim() ? { notes: E.notes.value.trim() } : {}), ...(E.announce.value.trim() ? { announcement: E.announce.value.trim() } : {}), ...(E.playguide.value.trim() ? { playguideUrl: E.playguide.value.trim() } : {}),
           ...(st.head !== null ? { snsHead: st.head === '' ? ' ' : st.head } : {}), ...(E.actLabel.value.trim() ? { actLabel: E.actLabel.value.trim() } : {}), ...(E.shopLabel.value.trim() ? { shopLabel: E.shopLabel.value.trim() } : {}), ...(pr.checked ? {} : { profileReserve: false }) } };
       return { nl, ni };
@@ -1057,7 +1057,7 @@ async function liveFormView(id) {
       sec('基本情報', field('出演？主催？', chips([{ id: 'attend', label: '出演(呼ばれた)' }, { id: 'host', label: '主催(自分たちで開催)' }], st.kind, k => { st.kind = k; refresh(); })),
         field('公演名', E.name), field('正式なライブ名(任意)', E.official), field('SNSの本文の見出し(1行目)', headChips), headIn, field('日付', E.date)),
       sec('時間', two(field('開場', E.open), field('開演', E.start)), field('終演', E.end)),
-      sec('会場', field('会場名', E.venue, '会場のSNSアカウントは「(@○○)」で書くと、Instagramで使えます'), dl, field('地域', E.pref), field('会場の住所', E.address, 'Bandsintown用CSVの住所欄に入ります（任意）'), addrBtn, addrCand),
+      sec('会場', field('会場名', E.venue, '会場のSNSアカウントは「(@○○)」で書くと、Instagramで使えます'), dl, field('地域', E.pref), field('会場の住所', E.address, 'Bandsintown用CSVの住所欄に入ります（任意）'), addrBtn, addrCand, field('Bandsintown用の会場名（サーキットなど、会場が複数のとき）', E.bitVenue, 'Wiθが出る会場が決まったら入れてください。決まるまでは、CSVは作れません'), field('Bandsintown用の住所', E.bitAddress)),
       sec('出演者・出店', two(field('出演者の見出し', E.actLabel), field('出店の見出し', E.shopLabel)), field('出演者', E.performers), field('出店', E.shops)),
       sec('チケット', two(field('チケット料金', E.price), field('ドリンク代', E.drink)), field('販売方法・予約方法', E.sales), field('予約フォームのURL', E.reserve), field('プレイガイドのURL', E.playguide)),
       sec('特典・注意事項・告知文', field('入場特典', E.bonus), field('注意事項', E.notes), field('告知文(追加のひとこと)', E.announce)),
@@ -1170,7 +1170,7 @@ async function shareStagePlot(live, info, files) {
 }
 // ---------- 告知(managerの文面生成・進行管理を移したもの) ----------
 const ANN_FIELDS = [
-  ['venueAddress', '会場の住所(Bandsintownに入ります)', 'text'], ['drinkFee', 'ドリンク代(例 +1D ¥600)', 'text'], ['bonus', '入場特典', 'text'], ['salesMethod', '販売方法・予約方法', 'area'],
+  ['venueAddress', '会場の住所(Bandsintownに入ります)', 'text'], ['bitVenue', 'Bandsintown用の会場名(会場が複数のとき、Wiθが出る会場)', 'text'], ['bitAddress', 'Bandsintown用の住所', 'text'], ['drinkFee', 'ドリンク代(例 +1D ¥600)', 'text'], ['bonus', '入場特典', 'text'], ['salesMethod', '販売方法・予約方法', 'area'],
   ['shops', '出店(1行に1店。「FOOD:」のように:で終わる行は小見出し)', 'area'], ['notes', '注意事項など', 'area'], ['announcement', '追加の一言(SNSの本文に入ります)', 'area'],
   ['playguideUrl', 'プレイガイドのURL', 'text'], ['snsHead', 'SNS本文の見出し(空欄で見出しなし。未設定は【LIVE INFO】)', 'text'],
   ['actLabel', '出演者の見出し(未設定はACT)', 'text'], ['shopLabel', '出店の見出し(未設定はSHOP)', 'text'],
@@ -1697,6 +1697,7 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
         k === 'wordpress' && !conf ? h('button', { class: 'btn small ghost', onclick: () => schedWp(c, p) }, '🕒 予約公開') : null,
         k === 'wordpress' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.wpPublish({ check: true })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'bandsintown' ? h('button', { class: 'btn small', onclick: () => {
+          if (R.multiVenue(ml)) { toast('会場が2つ以上です。Wiθが出る会場が決まったら、ライブ編集の「Bandsintown用の会場名」に入れてから作ってください', 'err'); return; }
           try {
             const f = new File([R.bandsintownCsv(ml)], 'bandsintown-' + String(l.live_date || '').slice(0, 10) + '.csv', { type: 'text/csv' });
             const aEl = h('a', { href: URL.createObjectURL(f), download: f.name }); document.body.append(aEl); aEl.click(); aEl.remove();

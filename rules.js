@@ -375,6 +375,8 @@ export function generateContent(live, destKey) {
 // ------------------------------------------------------------
 const BIT_CITY = { '鹿児島': 'Kagoshima', '福岡': 'Fukuoka', '北九州': 'Kitakyushu', '小倉': 'Kitakyushu', '熊本': 'Kumamoto', '長崎': 'Nagasaki', '佐賀': 'Saga', '大分': 'Oita', '宮崎': 'Miyazaki', '沖縄': 'Okinawa', '那覇': 'Naha', '広島': 'Hiroshima', '岡山': 'Okayama', '山口': 'Yamaguchi', '徳島': 'Tokushima', '高松': 'Takamatsu', '香川': 'Kagawa', '松山': 'Matsuyama', '愛媛': 'Ehime', '高知': 'Kochi', '神戸': 'Kobe', '大阪': 'Osaka', '京都': 'Kyoto', '奈良': 'Nara', '名古屋': 'Nagoya', '東京': 'Tokyo', '横浜': 'Yokohama', '仙台': 'Sendai', '札幌': 'Sapporo', '新潟': 'Niigata', '金沢': 'Kanazawa', '静岡': 'Shizuoka', '浜松': 'Hamamatsu', '三重': 'Mie', '津': 'Tsu' };
 export const BIT_HEADERS = ['Venue', 'Country', 'Address', 'City', 'Region', 'Postal Code', 'Start Date', 'End Date', 'Start Time', 'End Time', 'Streaming Link', 'Ticket Link', 'Ticket Type', 'Ticket Link 2', 'Ticket Type 2', 'On-Sale Date', 'On-Sale Time', 'Lineup', 'Event Name', 'Description', 'Scheduled date', 'Scheduled time', 'Timezone'];
+/** 会場が2つ以上（サーキットなど）で、Bandsintown用の会場が未入力か */
+export const multiVenue = (live) => !String(live.bitVenue || '').trim() && /[&＆／/、,]|\s[×x]\s/.test(venuePlainName(live));
 export function bandsintownRow(live) {
   const hm = (s) => { const m = /(\d{1,2})\s*[:：]\s*(\d{2})/.exec(String(s || '').normalize('NFKC')); return m ? String(m[1]).padStart(2, '0') + ':' + m[2] : ''; };
   const city = BIT_CITY[String(live.region || '').trim()] || String(live.region || '').trim();
@@ -382,7 +384,7 @@ export function bandsintownRow(live) {
   const link = primaryLink(live) || '';
   const desc = [live.bonus ? '入場特典：' + live.bonus : '', live.notes].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   return {
-    'Venue': venuePlainName(live), 'Country': 'Japan', 'Address': live.venueAddress || '', 'City': city, 'Region': city, 'Postal Code': '',
+    'Venue': String(live.bitVenue || '').trim() || venuePlainName(live), 'Country': 'Japan', 'Address': String(live.bitAddress || '').trim() || live.venueAddress || '', 'City': city, 'Region': city, 'Postal Code': '',
     'Start Date': String(live.date || '').slice(0, 10), 'End Date': '', 'Start Time': hm(live.startTime) || hm(live.openTime), 'End Time': '',
     'Streaming Link': '', 'Ticket Link': link, 'Ticket Type': link ? 'Tickets' : '', 'Ticket Link 2': '', 'Ticket Type 2': '', 'On-Sale Date': '', 'On-Sale Time': '',
     'Lineup': lineup, 'Event Name': live.title || '', 'Description': desc, 'Scheduled date': '', 'Scheduled time': '', 'Timezone': 'Asia/Tokyo',
