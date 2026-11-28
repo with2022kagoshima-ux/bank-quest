@@ -1,8 +1,8 @@
 // Wiθ MONEY — 画面
-import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=77';
-import * as R from './rules.js?v=88';
-import { squareMaker, storyMaker } from './snsmk.js?v=88';
-import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=77';
+import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=89';
+import * as R from './rules.js?v=89';
+import { squareMaker, storyMaker } from './snsmk.js?v=89';
+import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=89';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
 const _rc = Element.prototype.replaceChildren;
@@ -214,7 +214,7 @@ function openMenu() {
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
     legalLinks(),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-88'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-89'),
   ]);
 }
 
@@ -949,6 +949,7 @@ async function liveFormView(id) {
     if (my !== renderId) return;
     const a = info.ann || {};
     const venues = await api.venues().catch(() => []);
+    const venueAddrs = await api.venueAddresses().catch(() => ({}));
     const st = { kind: l ? l.kind : 'attend', head: typeof a.snsHead === 'string' ? a.snsHead : null, dest: 'instagram' };
     const txt = (v, ph, extra = {}) => h('input', { type: 'text', autocomplete: 'off', placeholder: ph || '', value: v || '', ...extra });
     const area = (v, ph, rows = 4) => { const e = h('textarea', { rows, class: 'area', autocomplete: 'off', placeholder: ph || '' }); e.value = v || ''; return e; };
@@ -965,7 +966,7 @@ async function liveFormView(id) {
       memo: txt(l && l.memo, '内部メモ(公開されません)'),
     };
     const dl = h('datalist', { id: 'lf-venues' }, ...venues.map(v => h('option', { value: v.name })));
-    E.venue.addEventListener('change', () => { const x = venues.find(v => v.name === E.venue.value.trim()); if (x && x.prefecture && !E.pref.value.trim()) { E.pref.value = x.prefecture; refresh(); } });
+    E.venue.addEventListener('change', () => { const x = venues.find(v => v.name === E.venue.value.trim()); if (x && x.prefecture && !E.pref.value.trim()) { E.pref.value = x.prefecture; refresh(); } const ad = venueAddrs[E.venue.value.trim()]; if (ad && !E.address.value.trim()) { E.address.value = ad; toast('前回入れた会場の住所を入れました', 'ok'); refresh(); } });
     const pr = h('input', { type: 'checkbox' }); pr.checked = a.profileReserve !== false;
     const flyer = h('input', { type: 'file', accept: 'image/*' });
     const headIn = txt(st.head === null ? '' : st.head, '【LIVE INFO】(空欄で見出しなし)');

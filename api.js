@@ -356,6 +356,13 @@ const real = {
   async gfSchedDel(id) { await rest('gf_scheduled?id=eq.' + encodeURIComponent(id), { method: 'DELETE', prefer: 'return=minimal' }); },
   liveRating: async () => { const r = await rest('settings?select=value&key=eq.live_rating'); return r[0] ? r[0].value : null; },
   venues: () => rest('venues?select=id,name,prefecture&order=name'),
+  // 会場名 → いちばん新しいライブに入れた住所（住所の自動入力用）
+  async venueAddresses() {
+    const [vs, ls] = await Promise.all([rest('venues?select=id,name'), rest('lives?select=venue_id,ann,live_date&ann=not.is.null&order=live_date.desc')]);
+    const nm = new Map(vs.map(v => [v.id, v.name])); const out = {};
+    for (const l of ls) { const ad = l.ann && typeof l.ann === 'object' ? String(l.ann.venueAddress || '').trim() : ''; const n = nm.get(l.venue_id); if (ad && n && !(n in out)) out[n] = ad; }
+    return out;
+  },
   async _venueId(name, pref) {
     name = (name || '').trim(); if (!name) return null;
     const ex = await rest(`venues?select=id&name=eq.${encodeURIComponent(name)}`);
@@ -641,6 +648,7 @@ const SG = [{ id: 's1', title: 'ウィズ', kind: 'original', artist: null, alia
       return { income: Math.max(inc, 0), sts: Math.max(sts, 0) };
     },
     async liveRating() { return null; },
+    async venueAddresses() { await wait(); return {}; },
     async venues() { await wait(); return [...new Set(LV.map(l => l.venue).filter(Boolean))].map(n => ({ id: n, name: n, prefecture: '鹿児島' })); },
     async addLive(f) { await wait(); const id = 'L' + (++n); LV.push({ id, live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue: f.venue || '', memo: f.memo || '', status: 'draft', score: null }); return id; },
     async saveLive(id, f) { await wait(); Object.assign(LV.find(l => l.id === id), { live_date: f.date, event_name: f.name, kind: f.kind, prefecture: f.prefecture || null, venue: f.venue || '', memo: f.memo || '' }); },
