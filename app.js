@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=77';
-import * as R from './rules.js?v=84';
-import { squareMaker, storyMaker } from './snsmk.js?v=84';
+import * as R from './rules.js?v=85';
+import { squareMaker, storyMaker } from './snsmk.js?v=85';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=77';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -198,6 +198,14 @@ function pickBy(force) {
     ]);
   });
 }
+function legalLinks() {
+  return h('div', { class: 'legal' },
+    h('p', {}, 'このアプリは YouTube API サービスを利用して、動画を YouTube にアップロードします。'),
+    h('p', {}, h('a', { href: 'privacy.html', target: '_blank', rel: 'noopener' }, 'プライバシーポリシー'), ' ・ ',
+      h('a', { href: 'terms.html', target: '_blank', rel: 'noopener' }, '利用規約'), ' ・ ',
+      h('a', { href: 'https://www.youtube.com/t/terms', target: '_blank', rel: 'noopener' }, 'YouTube利用規約'), ' ・ ',
+      h('a', { href: 'https://policies.google.com/privacy', target: '_blank', rel: 'noopener' }, 'Googleプライバシーポリシー')));
+}
 function openMenu() {
   const m = modal([
     h('h3', {}, 'メニュー'),
@@ -205,7 +213,8 @@ function openMenu() {
     h('button', { class: 'btn', onclick: () => { m.close(); pickBy(false); } }, '入力者を変える'),
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-84'),
+    legalLinks(),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-85'),
   ]);
 }
 
@@ -219,7 +228,7 @@ function loginView() {
     ev.preventDefault(); msg.textContent = ''; btn.disabled = true;
     try { await api.login(email.value.trim(), pass.value); localStorage.setItem('withi_email', email.value.trim()); await boot(); location.hash = '#/home'; }
     catch (e) { msg.textContent = errMsg(e); btn.disabled = false; }
-  } }, h('div', { class: 'logo' }, 'Wiθ', h('span', {}, 'BANK QUEST')), field('メール', email), field('パスコード', pass), msg, btn);
+  } }, h('div', { class: 'logo' }, 'Wiθ', h('span', {}, 'BANK QUEST')), field('メール', email), field('パスコード', pass), msg, btn, legalLinks());
   $app.replaceChildren(h('div', { class: 'screen center' }, form));
 }
 

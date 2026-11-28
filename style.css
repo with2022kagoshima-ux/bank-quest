@@ -162,3 +162,5 @@ input[type=date]::-webkit-calendar-picker-indicator{display:none}
 .lrow.draft{opacity:.85;border-left:3px solid var(--yellow)}
 .pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13.5px;line-height:1.6;margin:8px 0}
 .area{width:100%;box-sizing:border-box;font:inherit;padding:10px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:inherit}
+
+.legal{color:var(--muted);font-size:12px;text-align:center;line-height:1.7;margin-top:8px}.legal a{color:var(--muted);text-decoration:underline}
