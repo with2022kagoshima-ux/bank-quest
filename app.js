@@ -1,7 +1,7 @@
 // Wiθ MONEY — 画面
 import { api, DEMO, ApiError, ymd, queued, flushQueue } from './api.js?v=77';
-import * as R from './rules.js?v=85';
-import { squareMaker, storyMaker } from './snsmk.js?v=85';
+import * as R from './rules.js?v=86';
+import { squareMaker, storyMaker } from './snsmk.js?v=86';
 import { decodeCsv, sha256, parseAir, keyOf, autoMatch, isOvernight } from './air.js?v=77';
 
 // replaceChildren は null を文字の「null」にしてしまうため、空の要素は取り除く
@@ -214,7 +214,7 @@ function openMenu() {
     DEMO ? h('p', { class: 'muted' }, 'デモ表示中（架空のデータ・保存されません）') :
       h('button', { class: 'btn ghost', onclick: () => { api.logout(); m.close(); location.hash = '#/login'; } }, 'ログアウト'),
     legalLinks(),
-    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-85'),
+    h('p', { class: 'ver' }, 'Wiθ BANK QUEST  ・ 版 11/27-86'),
   ]);
 }
 
@@ -1484,6 +1484,8 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
     } catch (e) { toast(errMsg(e), 'err'); }
   };
   const ytBox = h('div', { class: 'lsub', style: 'margin-top:6px' });
+  const ytPriv = h('select', { style: 'width:auto;display:inline-block;padding:4px 8px' }, h('option', { value: 'private' }, '非公開'), h('option', { value: 'unlisted' }, '限定公開（URLを知る人のみ）'), h('option', { value: 'public' }, '公開'));
+  const PRIV = { private: '非公開', unlisted: '限定公開', public: '公開' };
   const sendYt = async (c, bodyEl, tagsEl) => {
     if (block) { toast(block, 'err'); return; }
     const inp = h('input', { type: 'file', accept: 'video/*', style: 'display:none' });
@@ -1493,10 +1495,11 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
       if (!f) return;
       const title = (c.title || '').trim();
       const desc = [bodyEl.value, tagsEl ? tagsEl.value : ''].filter(x => x && x.trim()).join('\n\n');
-      if (!(await confirmBox('YouTubeに非公開でアップロードしますか？', 'ファイル: ' + f.name + '（' + (f.size / 1048576).toFixed(1) + 'MB）\nタイトル: ' + title + '\n\n非公開で入ります。公開はYouTube Studioで行ってください。\nアップロード中はこの画面を閉じないでください。', 'アップロードする'))) return;
+      const pv = ytPriv.value in PRIV ? ytPriv.value : 'private';
+      if (!(await confirmBox('YouTubeに「' + PRIV[pv] + '」でアップロードしますか？', 'ファイル: ' + f.name + '（' + (f.size / 1048576).toFixed(1) + 'MB）\nタイトル: ' + title + '\n\n公開設定: ' + PRIV[pv] + (pv === 'public' ? '\n※アップロードが終わると、すぐ誰でも見られる状態になります。' : '\n公開の切り替えはYouTube Studioで行えます。') + '\nアップロード中はこの画面を閉じないでください。', 'アップロードする'))) return;
       try {
         ytBox.textContent = '準備中…';
-        const init = await api.ytpost({ action: 'init', title, description: desc, size: f.size, mime: f.type || 'video/mp4', origin: location.origin });
+        const init = await api.ytpost({ action: 'init', title, description: desc, size: f.size, mime: f.type || 'video/mp4', origin: location.origin, privacy: pv });
         const j = await new Promise((res, rej) => {
           const x = new XMLHttpRequest(); x.open('PUT', init.uploadUrl);
           x.setRequestHeader('Content-Type', f.type || 'video/mp4');
@@ -1506,10 +1509,10 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
           x.send(f);
         });
         const url = 'https://studio.youtube.com/video/' + j.id + '/edit';
-        ytBox.replaceChildren('アップロードできました（非公開）。', h('a', { href: url, target: '_blank', rel: 'noopener' }, 'YouTube Studioで開く'));
+        ytBox.replaceChildren('アップロードできました（' + PRIV[pv] + '）。', h('a', { href: url, target: '_blank', rel: 'noopener' }, 'YouTube Studioで開く'));
         const hist = [...(pm.get('youtube')?.history || []), { at: new Date().toISOString(), status: 'success', url, id: j.id, by: state.by || null }].slice(-30);
         await api.saveLivePost(l.id, 'youtube', { status: 'success', history: hist }, state.by);
-        toast('YouTubeに非公開でアップロードしました。公開はYouTube Studioで押してください', 'ok');
+        toast('YouTubeに' + PRIV[pv] + 'でアップロードしました', 'ok');
       } catch (e) { ytBox.textContent = ''; toast(errMsg(e), 'err'); }
     };
     inp.click();
@@ -1686,7 +1689,8 @@ function announcePane(l, info, conf, posts, reload, files, furl) {
             toast('CSVを作りました。Bandsintown for Artists の Events > Upload からアップロードしてください（下書きとして入ります）', 'ok');
           } catch (e) { toast(errMsg(e), 'err'); }
         } }, '📄 アップロード用CSV') : null,
-        k === 'youtube' && !conf ? h('button', { class: 'btn small', onclick: () => sendYt(c, body, tags) }, '🎬 動画を選んで非公開アップロード') : null,
+        k === 'youtube' && !conf ? h('span', { class: 'lsub' }, '公開設定: ', ytPriv) : null,
+        k === 'youtube' && !conf ? h('button', { class: 'btn small', onclick: () => sendYt(c, body, tags) }, '🎬 動画を選んでアップロード') : null,
         k === 'youtube' ? h('button', { class: 'btn small ghost', onclick: async () => { try { const j = await api.ytpost({ action: 'connect' }); location.href = j.url; } catch (e) { toast(errMsg(e), 'err'); } } }, '🔗 YouTubeと連携する') : null,
         k === 'youtube' ? h('button', { class: 'btn small ghost', onclick: async () => { try { toast((await api.ytpost({ action: 'check' })).message, 'ok'); } catch (e) { toast(errMsg(e), 'err'); } } }, '接続テスト') : null,
         k === 'googleForm' && !conf ? h('button', { class: 'btn small', onclick: () => sendGf(c, p) }, '📝 フォームに追加') : null,
